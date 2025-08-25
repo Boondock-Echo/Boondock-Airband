@@ -16,6 +16,18 @@
     <h2>Logs</h2>
     <div id="logs"></div>
 
+    <h2>Recordings</h2>
+    <ul>
+    {% for file in recordings %}
+        <li>
+            <audio controls src="{{ url_for('serve_recording', filename=file) }}"></audio>
+            {{ file }}
+        </li>
+    {% else %}
+        <li>No recordings found.</li>
+    {% endfor %}
+    </ul>
+
     <script>
         const logsDiv = document.getElementById('logs');
         document.getElementById('startBtn').addEventListener('click', () => {

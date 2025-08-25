@@ -1,8 +1,9 @@
 import os
+import re
 import subprocess
 import threading
 from collections import deque
-from flask import Flask, jsonify, render_template
+from flask import Flask, jsonify, render_template, send_from_directory
 
 app = Flask(__name__)
 
@@ -18,9 +19,43 @@ def _read_output(pipe):
     pipe.close()
 
 
+def _get_recordings_dir():
+    """Return the first directory configured for file recordings.
+
+    The rtl_airband configuration file may contain multiple `directory`
+    entries. For the purposes of the web UI we only care about the first one
+    found. If the configuration file cannot be read or no directory is found,
+    ``None`` is returned.
+    """
+
+    config_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "airband.conf")
+    try:
+        with open(config_path, "r", encoding="utf-8") as cfg:
+            match = re.search(r"directory\s*=\s*\"([^\"]+)\"", cfg.read())
+            if match:
+                return match.group(1)
+    except FileNotFoundError:
+        pass
+    return None
+
+
 @app.route('/')
 def index():
-    return render_template('index.html')
+    recordings_dir = _get_recordings_dir()
+    recordings = []
+    if recordings_dir and os.path.isdir(recordings_dir):
+        for fname in sorted(os.listdir(recordings_dir)):
+            if fname.lower().endswith((".mp3", ".wav", ".ogg")):
+                recordings.append(fname)
+    return render_template('index.html', recordings=recordings)
+
+
+@app.route('/recordings/<path:filename>')
+def serve_recording(filename):
+    recordings_dir = _get_recordings_dir()
+    if recordings_dir:
+        return send_from_directory(recordings_dir, filename)
+    return "Recording directory not configured", 404
 
 
 @app.route('/start', methods=['POST'])
