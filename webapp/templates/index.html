@@ -1,0 +1,37 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="utf-8" />
+    <title>RTL Airband Control</title>
+    <style>
+        body { font-family: Arial, sans-serif; margin: 20px; }
+        #logs { border: 1px solid #ccc; height: 300px; overflow-y: scroll; background: #f9f9f9; padding: 10px; white-space: pre-wrap; }
+        button { margin-right: 10px; }
+    </style>
+</head>
+<body>
+    <h1>RTL Airband Control</h1>
+    <button id="startBtn">Start</button>
+    <button id="stopBtn">Stop</button>
+    <h2>Logs</h2>
+    <div id="logs"></div>
+
+    <script>
+        const logsDiv = document.getElementById('logs');
+        document.getElementById('startBtn').addEventListener('click', () => {
+            fetch('/start', {method: 'POST'});
+        });
+        document.getElementById('stopBtn').addEventListener('click', () => {
+            fetch('/stop', {method: 'POST'});
+        });
+        async function updateLogs(){
+            const res = await fetch('/logs');
+            const data = await res.json();
+            logsDiv.textContent = data.lines.join('\n');
+            logsDiv.scrollTop = logsDiv.scrollHeight;
+        }
+        setInterval(updateLogs, 1000);
+        updateLogs();
+    </script>
+</body>
+</html>
