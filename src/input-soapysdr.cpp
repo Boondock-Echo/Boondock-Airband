@@ -32,7 +32,7 @@
 #include <libconfig.h++>    // Setting
 #include "input-common.h"   // input_t, sample_format_t, input_state_t, MODULE_EXPORT
 #include "input-helpers.h"  // circbuffer_append
-#include "rtl_airband.h"    // do_exit, fft_size, debug_print, XCALLOC, error()
+#include "boondock_airband.h"    // do_exit, fft_size, debug_print, XCALLOC, error()
 
 using namespace std;
 
@@ -88,7 +88,7 @@ static bool soapysdr_choose_sample_format(SoapySDRDevice* const sdr, input_t* co
         ret = true;
         goto end;
     }
-    // Native format is not supported by rtl_airband; find out if there is anything else.
+    // Native format is not supported by boondock_airband; find out if there is anything else.
     formats = SoapySDRDevice_getStreamFormats(sdr, SOAPY_SDR_RX, dev_data->channel, &len);
     if (formats == NULL || len == 0) {
         log(LOG_ERR, "SoapySDR: device '%s': failed to read supported sample formats\n", dev_data->device_string);

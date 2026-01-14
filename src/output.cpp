@@ -50,7 +50,7 @@
 #include "config.h"
 #include "helper_functions.h"
 #include "input-common.h"
-#include "rtl_airband.h"
+#include "boondock_airband.h"
 
 void shout_setup(icecast_data* icecast, mix_modes mixmode) {
     int ret;

@@ -28,7 +28,7 @@
 #include <libconfig.h++>    // Setting
 #include "input-common.h"   // input_t, sample_format_t, input_state_t, MODULE_EXPORT
 #include "input-helpers.h"  // circbuffer_append
-#include "rtl_airband.h"    // do_exit, fft_size, debug_print, XCALLOC, error()
+#include "boondock_airband.h"    // do_exit, fft_size, debug_print, XCALLOC, error()
 
 using namespace std;
 

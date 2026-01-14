@@ -47,9 +47,9 @@ RUN git clone https://github.com/f4exb/libmirisdr-4 && \
 # TODO: build anything from source?
 
 # set working dir for project build
-WORKDIR /rtl_airband_build
+WORKDIR /boondock_airband_build
 
-# copy in the rtl_airband source
+# copy in the boondock_airband source
 # WARNING: not copying in the whole repo, this may need to be updated if build files are added outside of src/
 COPY ./.git/ .git/
 COPY ./src/ src/
@@ -102,16 +102,16 @@ RUN dpkg -i /tmp/librtlsdr0_*.deb && \
 # copy (from build container) libmirisdr-4 library
 COPY --from=build /usr/local/lib/libmirisdr.so.4 /usr/local/lib/
 
-# Copy rtl_airband from the build container
+# Copy boondock_airband from the build container
 COPY LICENSE /app/
-COPY --from=build /rtl_airband_build/build_dir/src/unittests /app/
-COPY --from=build /rtl_airband_build/build_dir/src/rtl_airband /app/
-RUN chmod a+x /app/unittests /app/rtl_airband
+COPY --from=build /boondock_airband_build/build_dir/src/unittests /app/
+COPY --from=build /boondock_airband_build/build_dir/src/boondock_airband /app/
+RUN chmod a+x /app/unittests /app/boondock_airband
 
 # make sure unit tests pass
 RUN /app/unittests
 
-# Use tini as init and run rtl_airband from /app/
+# Use tini as init and run boondock_airband from /app/
 ENTRYPOINT ["/usr/bin/tini", "--"]
 WORKDIR /app/
-CMD ["/app/rtl_airband", "-F", "-e", "-c", "/app/rtl_airband.conf"]
+CMD ["/app/boondock_airband", "-F", "-e", "-c", "/app/boondock_airband.conf"]

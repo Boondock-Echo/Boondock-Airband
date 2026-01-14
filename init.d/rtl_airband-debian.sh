@@ -1,18 +1,18 @@
 #! /bin/sh
 ### BEGIN INIT INFO
-# Provides:          rtl_airband
+# Provides:          boondock_airband
 # Required-Start:    $remote_fs $syslog
 # Required-Stop:     $remote_fs $syslog
 # Default-Start:     2 3 4 5
 # Default-Stop:      0 1 6
-# Short-Description: rtl_airband initscript
+# Short-Description: boondock_airband initscript
 ### END INIT INFO
 
 # Author: Tomasz Lemiech <szpajder@gmail.com>
 
 PATH=/sbin:/usr/sbin:/bin:/usr/bin:/usr/local/bin
 DESC="RTLSDR airband receiver"
-NAME=rtl_airband
+NAME=boondock_airband
 DAEMON=/usr/local/bin/$NAME
 DAEMON_ARGS=""
 PIDFILE=/run/$NAME.pid
