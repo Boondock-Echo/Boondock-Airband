@@ -30,7 +30,7 @@
 #include <iostream>
 #include "config.h"
 #include "logging.h"
-#include "rtl_airband.h"
+#include "boondock_airband.h"
 
 int atomic_inc(volatile int* pv) {
     return __sync_fetch_and_add(pv, 1);

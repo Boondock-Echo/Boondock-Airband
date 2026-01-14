@@ -1,5 +1,5 @@
 /*
- * rtl_airband.h
+ * boondock_airband.h
  * Global declarations
  *
  * Copyright (c) 2015-2021 Tomasz Lemiech <szpajder@gmail.com>
@@ -18,8 +18,8 @@
  * along with this program; if not, see <https://www.gnu.org/licenses/>.
  */
 
-#ifndef _RTL_AIRBAND_H
-#define _RTL_AIRBAND_H 1
+#ifndef _BOONDOCK_AIRBAND_H
+#define _BOONDOCK_AIRBAND_H 1
 #include <lame/lame.h>
 #include <netinet/in.h>  // sockaddr_in
 #include <pthread.h>
@@ -58,8 +58,8 @@
 #define SYSCONFDIR "/usr/local/etc"
 #endif /* SYSCONFDIR */
 
-#define CFGFILE SYSCONFDIR "/rtl_airband.conf"
-#define PIDFILE "/run/rtl_airband.pid"
+#define CFGFILE SYSCONFDIR "/boondock_airband.conf"
+#define PIDFILE "/run/boondock_airband.pid"
 
 #define MIN_BUF_SIZE 2560000
 #define DEFAULT_SAMPLE_RATE 2560000
@@ -334,7 +334,7 @@ struct output_params_t {
 };
 
 // version.cpp
-extern char const* RTL_AIRBAND_VERSION;
+extern char const* BOONDOCK_AIRBAND_VERSION;
 
 // output.cpp
 lame_t airlame_init(mix_modes mixmode, int highpass, int lowpass);
@@ -344,7 +344,7 @@ void disable_channel_outputs(channel_t* channel);
 void* output_check_thread(void* params);
 void* output_thread(void* params);
 
-// rtl_airband.cpp
+// boondock_airband.cpp
 extern bool use_localtime;
 extern bool multiple_demod_threads;
 extern bool multiple_output_threads;
@@ -404,4 +404,4 @@ void pulse_shutdown(pulse_data* pdata);
 void pulse_write_stream(pulse_data* pdata, mix_modes mode, const float* data_left, const float* data_right, size_t len);
 #endif /* WITH_PULSEAUDIO */
 
-#endif /* _RTL_AIRBAND_H */
+#endif /* _BOONDOCK_AIRBAND_H */

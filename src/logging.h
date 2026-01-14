@@ -30,7 +30,7 @@
 #define UNUSED(x) (void)(x)
 
 #ifdef DEBUG
-#define DEBUG_PATH "rtl_airband_debug.log"
+#define DEBUG_PATH "boondock_airband_debug.log"
 #define debug_print(fmt, ...)                                 \
     do {                                                      \
         fprintf(debugf, "%s(): " fmt, __func__, __VA_ARGS__); \

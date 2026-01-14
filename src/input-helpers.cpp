@@ -22,7 +22,7 @@
 #include <string.h>        // memcpy
 #include <iostream>        // cerr
 #include "input-common.h"  // input_t
-#include "rtl_airband.h"   // debug_print
+#include "boondock_airband.h"   // debug_print
 
 /* Write input data into circular buffer input->buffer.
  * In general, input->buffer_size is not an exact multiple of len,

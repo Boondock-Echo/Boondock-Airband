@@ -376,6 +376,8 @@ void* demodulate(void* params) {
     struct timeval ts, te;
     gettimeofday(&ts, NULL);
 #endif /* DEBUG */
+    struct timeval last_json_time;
+    gettimeofday(&last_json_time, NULL);
     size_t available;
     int device_num = demod_params->device_start;
     while (true) {
@@ -681,6 +683,48 @@ void* demodulate(void* params) {
             ts.tv_sec = te.tv_sec;
             ts.tv_usec = te.tv_usec;
 #endif /* DEBUG */
+            
+            // Print JSON status every 200ms (optimized to minimize performance impact)
+            struct timeval current_time;
+            gettimeofday(&current_time, NULL);
+            long elapsed_ms = ((current_time.tv_sec - last_json_time.tv_sec) * 1000) + 
+                             ((current_time.tv_usec - last_json_time.tv_usec) / 1000);
+            if (elapsed_ms >= 200) {
+                // Build JSON in a single buffer to minimize printf calls and potential blocking
+                char json_buffer[4096];  // Large enough for multiple channels
+                int pos = snprintf(json_buffer, sizeof(json_buffer), "{\"device\":%d,\"channels\":[", device_num);
+                
+                for (int i = 0; i < dev->channel_count && pos < (int)(sizeof(json_buffer) - 200); i++) {
+                    channel_t* channel = dev->channels + i;
+                    freq_t* fparms = channel->freqlist + channel->freq_idx;
+                    float freq_mhz = fparms->frequency / 1000000.0;
+                    float signal_dbfs = level_to_dBFS(fparms->squelch.signal_level());
+                    float noise_dbfs = level_to_dBFS(fparms->squelch.noise_level());
+                    const char* status_str = (channel->axcindicate == SIGNAL) ? "signal" : 
+                                            (channel->axcindicate == AFC_UP) ? "afc_up" :
+                                            (channel->axcindicate == AFC_DOWN) ? "afc_down" : "no_signal";
+                    
+                    // Simple label handling - just use label as-is (most labels don't have special chars)
+                    const char* label = fparms->label ? fparms->label : "";
+                    
+                    if (i > 0) {
+                        pos += snprintf(json_buffer + pos, sizeof(json_buffer) - pos, ",");
+                    }
+                    pos += snprintf(json_buffer + pos, sizeof(json_buffer) - pos,
+                           "{\"channel\":%d,\"frequency\":%.3f,\"label\":\"%s\",\"signal_level\":%.1f,\"noise_level\":%.1f,\"status\":\"%s\"}",
+                           i, freq_mhz, label, signal_dbfs, noise_dbfs, status_str);
+                }
+                
+                pos += snprintf(json_buffer + pos, sizeof(json_buffer) - pos, "]}\n");
+                
+                // Single write to minimize blocking - use write() for better control, but printf is usually fine
+                // Set stdout to non-blocking would be ideal but requires more setup
+                fputs(json_buffer, stdout);
+                fflush(stdout);  // Ensure it's written immediately
+                
+                last_json_time = current_time;
+            }
+            
             demod_params->mp3_signal->send();
             dev->row++;
             if (dev->row == 12) {

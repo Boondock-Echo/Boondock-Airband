@@ -24,7 +24,7 @@
 #include <arpa/inet.h>  // inet_aton()
 #include <netdb.h>      // getaddrinfo()
 
-#include "rtl_airband.h"
+#include "boondock_airband.h"
 
 bool udp_stream_init(udp_stream_data* sdata, mix_modes mode, size_t len) {
     // pre-allocate the stereo buffer

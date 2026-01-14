@@ -26,7 +26,7 @@
 #include <cstdlib>
 #include <cstring>
 #include "config.h"
-#include "rtl_airband.h"
+#include "boondock_airband.h"
 
 static char* err;
 

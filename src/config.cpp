@@ -27,7 +27,7 @@
 #include <iostream>
 #include <libconfig.h++>
 #include "input-common.h"  // input_t
-#include "rtl_airband.h"
+#include "boondock_airband.h"
 
 using namespace std;
 
@@ -237,7 +237,7 @@ static int parse_outputs(libconfig::Setting& outs, channel_t* channel, int i, in
             pulse_data* pdata = (pulse_data*)(channel->outputs[oo].data);
             pdata->continuous = outs[o].exists("continuous") ? (bool)(outs[o]["continuous"]) : false;
             pdata->server = outs[o].exists("server") ? strdup(outs[o]["server"]) : NULL;
-            pdata->name = outs[o].exists("name") ? strdup(outs[o]["name"]) : "rtl_airband";
+            pdata->name = outs[o].exists("name") ? strdup(outs[o]["name"]) : "boondock_airband";
             pdata->sink = outs[o].exists("sink") ? strdup(outs[o]["sink"]) : NULL;
 
             if (outs[o].exists("stream_name")) {

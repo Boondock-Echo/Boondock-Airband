@@ -21,7 +21,7 @@
 #include <pulse/pulseaudio.h>
 #include <syslog.h>
 #include <iostream>
-#include "rtl_airband.h"
+#include "boondock_airband.h"
 
 #define SERVER_IFNOTNULL(x) ((x) ? (x) : "<default_server>")
 #define PA_LOOP_LOCK(x)                       \

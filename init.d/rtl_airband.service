@@ -6,7 +6,7 @@ After=network.target
 
 [Service]
 Type=simple
-ExecStart=/usr/local/bin/rtl_airband -Fe
+ExecStart=/usr/local/bin/boondock_airband -Fe
 # The program may exit only due to startup failure (eg. misconfiguration)
 # or due to failure of all SDR devices (eg. disconnection). In either case,
 # there is no point to restart it, because it would fail once again.
