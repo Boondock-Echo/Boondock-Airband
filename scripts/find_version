@@ -6,8 +6,10 @@ PROJECT_DIR_NAME="$(basename ${PROJECT_ROOT_PATH})"
 
 # if there is a .git directory at the project root then rely on git for the version string
 if [ -r "${PROJECT_GIT_DIR_PATH}" ] ; then
-    git describe --tags --abbrev --dirty --always
-    exit 0
+    git describe --tags --abbrev --dirty --always 2>/dev/null
+    if [ $? -eq 0 ]; then
+        exit 0
+    fi
 fi
 
 # if the proejct root directory matches the naming convetion of an extracted archive then
@@ -17,5 +19,6 @@ if [[ "${PROJECT_DIR_NAME}" =~ ^(RTLSDR-Airband|Boondock-Airband)-[0-9]*\.[0-9]*
     exit 0
 fi
 
-# print an error string to stderr (any output to stdout is considered success)
->&2 echo "did not find a git root directory at ${PROJECT_GIT_DIR_PATH} and failed to extract a version from ${PROJECT_DIR_NAME}"
+# fallback: use a default version if git is not available or directory name doesn't match
+echo "0.0.0-unknown"
+exit 0

@@ -207,15 +207,37 @@ elseif(PLATFORM STREQUAL "native")
 	CHECK_CXX_COMPILER_FLAG(-march=native CXX_HAS_MARCH_NATIVE)
 	if(CXX_HAS_MARCH_NATIVE)
 		add_compile_options(-march=native)
+		# Additional optimizations for native builds
+		CHECK_CXX_COMPILER_FLAG(-mtune=native CXX_HAS_MTUNE_NATIVE)
+		if(CXX_HAS_MTUNE_NATIVE)
+			add_compile_options(-mtune=native)
+		endif()
 	else()
 		message(FATAL_ERROR "Cannot build with PLATFORM=native: the compiler does not support -march=native option")
+	endif()
+# rpi5 - Raspberry Pi 5 specific optimizations (ARM Cortex-A76, ARMv8.2-A)
+elseif(PLATFORM STREQUAL "rpi5")
+	CHECK_CXX_COMPILER_FLAG(-march=armv8.2-a+fp16+simd CXX_HAS_ARMV82A)
+	if(CXX_HAS_ARMV82A)
+		add_compile_options(-march=armv8.2-a+fp16+simd -mtune=cortex-a76)
+		message(STATUS "Using Raspberry Pi 5 optimized build (ARMv8.2-A, Cortex-A76)")
+	else()
+		# Fallback to armv8-a if armv8.2-a not supported
+		CHECK_CXX_COMPILER_FLAG(-march=armv8-a CXX_HAS_ARMV8A)
+		if(CXX_HAS_ARMV8A)
+			add_compile_options(-march=armv8-a -mtune=cortex-a76)
+			message(STATUS "Using Raspberry Pi 5 optimized build (ARMv8-A, Cortex-A76)")
+		else()
+			message(WARNING "Compiler doesn't support ARMv8 optimizations, falling back to native")
+			add_compile_options(-march=native)
+		endif()
 	endif()
 # generic - dont add any hardware related flags, used to build a "portable" binary
 elseif(PLATFORM STREQUAL "generic")
 	# NO-OP
 # error out on unrecongnnized PLATFORM value
 else()
-	message(FATAL_ERROR "Unknown platform '${PLATFORM}'. Valid options are: rpiv2, native, and generic")
+	message(FATAL_ERROR "Unknown platform '${PLATFORM}'. Valid options are: rpiv2, native, rpi5, and generic")
 endif()
 
 # Try using VC GPU if enabled. Fallback to fftw3f if disabled or if VC lib not found
@@ -308,7 +330,7 @@ target_include_directories (boondock_airband_base PUBLIC
 # can't do this per target with cmake <3.13
 link_directories(${link_dirs})
 
-list(APPEND boondock_airband_obj_files $<TARGET_OBJECTS:rtl_airband_base>)
+list(APPEND boondock_airband_obj_files $<TARGET_OBJECTS:boondock_airband_base>)
 
 add_executable (boondock_airband ${boondock_airband_obj_files})
 set_property(TARGET boondock_airband PROPERTY ENABLE_EXPORTS 1)

@@ -139,7 +139,28 @@ cmake .. \
 make -j$(nproc)
 ```
 
-#### Option 3: Generic/Portable build
+#### Option 3: Raspberry Pi 5 optimized (Recommended for Pi 5)
+
+For Raspberry Pi 5, use the `rpi5` platform for maximum performance:
+
+```bash
+mkdir build && cd build
+cmake .. \
+    -DCMAKE_BUILD_TYPE=Release \
+    -DPLATFORM=rpi5 \
+    -DNFM=ON \
+    -DSOAPYSDR=ON
+make -j$(nproc)
+```
+
+This enables:
+- ARMv8.2-A architecture optimizations
+- Cortex-A76 CPU tuning
+- FP16 and SIMD instruction support
+- Link-time optimization (LTO) for better performance
+- Maximum compiler optimizations (-O3)
+
+#### Option 4: Generic/Portable build
 
 Build a portable binary (slower but works on all Pi models):
 
@@ -187,10 +208,15 @@ sudo boondock_airband -F -e -c /etc/boondock_airband.conf
 ### Raspberry Pi Performance Tips
 
 1. **For Raspberry Pi 2/3:** Use `-DPLATFORM=rpiv2` to leverage GPU acceleration
-2. **For Raspberry Pi 4/5:** Use `-DPLATFORM=native` for best CPU optimization
-3. **Reduce FFT size:** If experiencing performance issues, reduce `fft_size` in config (default 512, try 256)
-4. **Limit channels:** Fewer simultaneous channels = better performance
-5. **Use USB 3.0:** If using USB SDR dongles, connect to USB 3.0 ports on Pi 4/5
+2. **For Raspberry Pi 4:** Use `-DPLATFORM=native` for best CPU optimization
+3. **For Raspberry Pi 5:** Use `-DPLATFORM=rpi5` for maximum performance (ARMv8.2-A optimizations)
+4. **Use all CPU cores:** Always use `make -j$(nproc)` to utilize all cores during compilation
+5. **Reduce FFT size:** If experiencing performance issues, reduce `fft_size` in config (default 512, try 256)
+6. **Limit channels:** Fewer simultaneous channels = better performance
+7. **Use USB 3.0:** If using USB SDR dongles, connect to USB 3.0 ports on Pi 4/5
+8. **Increase CPU governor:** Set CPU to performance mode: `sudo cpufreq-set -g performance`
+9. **Disable unnecessary services:** Free up CPU/RAM by disabling unused services
+10. **Use fast storage:** If recording to files, use fast SD card (Class 10/A2) or USB 3.0 SSD
 
 ### Running as a Service on Raspberry Pi
 

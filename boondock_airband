@@ -1,0 +1,1 @@
+sudo ./src/boondock_airband -F -e -c /opt/boondock/airband_capture/rtl_airband.conf
