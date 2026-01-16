@@ -194,7 +194,7 @@ set(WITH_BCM_VC FALSE)
 
 # error out on depricated PLATFORM values
 if(PLATFORM STREQUAL "rpiv1" OR PLATFORM STREQUAL "armv7-generic" OR PLATFORM STREQUAL "armv8-generic")
-	message(FATAL_ERROR "platform '${PLATFORM}' has been deprecated, see https://github.com/rtl-airband/RTLSDR-Airband/discussions/447")
+	message(FATAL_ERROR "platform '${PLATFORM}' has been deprecated")
 # rpiv2 - Raspberry Pi 2 or Raspberry Pi 3 using Broadcom VideoCore IV GPU for FFT
 # NOTE: use 'native' to not use the GPU for FFT
 elseif(PLATFORM STREQUAL "rpiv2")
@@ -318,6 +318,7 @@ add_library (boondock_airband_base OBJECT
 	logging.cpp
 	filters.cpp
 	helper_functions.cpp
+	web_server.cpp
 	${CMAKE_CURRENT_BINARY_DIR}/version.cpp
 	${boondock_airband_extra_sources}
 	)
@@ -349,6 +350,12 @@ target_link_libraries (boondock_airband
 
 install(TARGETS boondock_airband
 	RUNTIME DESTINATION bin
+)
+
+# Install web UI HTML file
+install(FILES web_ui.html
+	DESTINATION share/boondock_airband
+	OPTIONAL
 )
 
 # TODO: install config if not present

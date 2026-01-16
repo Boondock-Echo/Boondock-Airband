@@ -1,6 +1,6 @@
 # Boondock-Airband
 
-Boondock-Airband receives analog radio voice channels and produces audio streams which can be routed to various outputs, such as online streaming services like LiveATC.net. Originally based on RTLSDR-Airband, this fork supports Realtek DVB-T dongles and other SDR devices via SoapySDR.
+Boondock-Airband receives analog radio voice channels and produces audio streams which can be routed to various outputs, such as online streaming services like LiveATC.net. It supports Realtek DVB-T dongles and other SDR devices via SoapySDR.
 
 ## Overview
 

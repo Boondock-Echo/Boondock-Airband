@@ -1,0 +1,500 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Boondock Airband Capture</title>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, sans-serif; background: #f5f5f5; color: #333; }
+        .header { background: white; padding: 20px; box-shadow: 0 2px 4px rgba(0,0,0,0.1); }
+        .header h1 { font-size: 24px; margin-bottom: 10px; }
+        .nav { display: flex; gap: 20px; border-bottom: 2px solid #e0e0e0; }
+        .nav a { padding: 10px 0; text-decoration: none; color: #666; border-bottom: 3px solid transparent; }
+        .nav a.active { color: #0066cc; border-bottom-color: #0066cc; }
+        .nav a:hover { color: #0066cc; }
+        .container { max-width: 1400px; margin: 20px auto; padding: 0 20px; }
+        .card { background: white; border-radius: 8px; padding: 20px; margin-bottom: 20px; box-shadow: 0 2px 4px rgba(0,0,0,0.1); }
+        .metrics { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 20px; margin-bottom: 20px; }
+        .metric { background: white; padding: 20px; border-radius: 8px; box-shadow: 0 2px 4px rgba(0,0,0,0.1); }
+        .metric h3 { font-size: 14px; color: #666; margin-bottom: 10px; }
+        .metric .value { font-size: 28px; font-weight: bold; color: #333; }
+        table { width: 100%; border-collapse: collapse; }
+        table th, table td { padding: 12px; text-align: left; border-bottom: 1px solid #e0e0e0; }
+        table th { background: #f8f8f8; font-weight: 600; color: #666; }
+        .status-enabled { color: #28a745; }
+        .status-running { color: #28a745; }
+        .btn { padding: 8px 16px; border: none; border-radius: 4px; cursor: pointer; font-size: 14px; }
+        .btn-primary { background: #0066cc; color: white; }
+        .btn-danger { background: #dc3545; color: white; }
+        .btn-success { background: #28a745; color: white; }
+        .form-group { margin-bottom: 15px; }
+        .form-group label { display: block; margin-bottom: 5px; font-weight: 500; }
+        .form-group input, .form-group select { width: 100%; padding: 8px; border: 1px solid #ddd; border-radius: 4px; }
+        .signal-bar { height: 20px; background: linear-gradient(to right, #28a745, #ffc107, #dc3545); border-radius: 4px; }
+        .hidden { display: none; }
+    </style>
+</head>
+<body>
+    <div class="header">
+        <h1>Boondock Airband Capture</h1>
+        <div class="nav">
+            <a href="#" class="nav-link active" data-page="home">Home</a>
+            <a href="#" class="nav-link" data-page="recordings">Recordings</a>
+            <a href="#" class="nav-link" data-page="device">Device</a>
+            <a href="#" class="nav-link" data-page="channels">Channels</a>
+            <a href="#" class="nav-link" data-page="outputs">Outputs</a>
+            <a href="#" class="nav-link" data-page="config">Config</a>
+        </div>
+    </div>
+    <div class="container">
+        <div id="page-home" class="page">
+            <div class="metrics">
+                <div class="metric">
+                    <h3>Today's Recordings</h3>
+                    <div class="value" id="recordings-count">0</div>
+                    <div style="font-size: 12px; color: #666; margin-top: 5px;">Uptime: <span id="uptime">0s</span></div>
+                </div>
+                <div class="metric">
+                    <h3>CPU Usage</h3>
+                    <div class="value" id="cpu-usage">0%</div>
+                    <div style="font-size: 12px; color: #666; margin-top: 5px;">Avg: <span id="cpu-avg">0%</span></div>
+                </div>
+                <div class="metric">
+                    <h3>Disk Usage</h3>
+                    <div class="value" id="disk-usage">0 GB</div>
+                    <div style="font-size: 12px; color: #666; margin-top: 5px;">Total: <span id="disk-total">0 GB</span></div>
+                </div>
+                <div class="metric">
+                    <h3>RAM Usage</h3>
+                    <div class="value" id="ram-usage">0%</div>
+                    <div style="font-size: 12px; color: #666; margin-top: 5px;">Avg: <span id="ram-avg">0%</span></div>
+                </div>
+            </div>
+            <div class="card">
+                <h2>Channel Status</h2>
+                <table id="channels-table">
+                    <thead>
+                        <tr>
+                            <th>CHANNEL</th>
+                            <th>SIGNAL</th>
+                            <th>SNR</th>
+                            <th>SIGNAL STRENGTH</th>
+                            <th>STATUS</th>
+                        </tr>
+                    </thead>
+                    <tbody id="channels-tbody"></tbody>
+                </table>
+                <div style="margin-top: 10px; font-size: 14px; color: #666;">
+                    <span id="channels-count">0</span> channels | <span id="service-status">Running</span> | Polling every 1s
+                </div>
+            </div>
+            <div class="card" id="errors-card" style="display: none;">
+                <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px;">
+                    <h2 style="color: #dc3545;">Errors</h2>
+                    <button class="btn btn-primary" onclick="clearErrors()">Clear</button>
+                </div>
+                <div id="errors-list" style="max-height: 300px; overflow-y: auto; background: #f8f8f8; padding: 10px; border-radius: 4px;">
+                    <p style="color: #666; font-style: italic;">No errors</p>
+                </div>
+            </div>
+        </div>
+        <div id="page-recordings" class="page hidden">
+            <div class="card">
+                <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px;">
+                    <h2>Recordings</h2>
+                    <button class="btn btn-primary" onclick="refreshRecordings()">Refresh</button>
+                </div>
+                <table>
+                    <thead>
+                        <tr>
+                            <th>Datetime</th>
+                            <th>Size</th>
+                            <th>Channel</th>
+                            <th>Play</th>
+                            <th>Actions</th>
+                        </tr>
+                    </thead>
+                    <tbody id="recordings-tbody"></tbody>
+                </table>
+            </div>
+        </div>
+        <div id="page-device" class="page hidden">
+            <div class="card">
+                <h2>Device Configuration</h2>
+                <form id="device-form">
+                    <div class="form-group">
+                        <label>Device Type</label>
+                        <select id="device-type" name="type">
+                            <option value="soapysdr">SoapySDR</option>
+                            <option value="rtlsdr">RTL-SDR</option>
+                            <option value="mirisdr">MiriSDR</option>
+                        </select>
+                    </div>
+                    <div class="form-group">
+                        <label>Device String (SoapySDR)</label>
+                        <input type="text" id="device-string" name="device_string" placeholder="driver=airspy">
+                        <small>Comma-separated variable=value pairs (e.g., driver=airspy,device_id=0). Use SoapySDRUtil to find your device.</small>
+                    </div>
+                    <div class="form-group">
+                        <label>Gain</label>
+                        <input type="text" id="device-gain" name="gain" placeholder="LNA=12,MIX=10,VGA=10">
+                        <small>Numeric value (e.g., 25.0) or component format (e.g., LNA=15,MIX=15,VGA=5). Use SoapySDRUtil to find gain components.</small>
+                    </div>
+                    <div class="form-group">
+                        <label>Sample Rate (Msps, optional)</label>
+                        <input type="text" id="device-sample-rate" name="sample_rate" placeholder="2.5">
+                        <small>Sampling rate. Default: 2.56 Msps if not specified.</small>
+                    </div>
+                    <div class="form-group">
+                        <label>Mode (optional)</label>
+                        <select id="device-mode" name="mode">
+                            <option value="multichannel">Multichannel</option>
+                            <option value="scan">Scan</option>
+                        </select>
+                        <small>Default: multichannel. Center frequency is required in multichannel mode.</small>
+                    </div>
+                    <button type="submit" class="btn btn-success">Save Device Configuration</button>
+                </form>
+            </div>
+        </div>
+        <div id="page-channels" class="page hidden">
+            <div class="card">
+                <h2>Channels</h2>
+                <div style="margin-bottom: 20px;">
+                    <button class="btn btn-success" onclick="addChannel()">+ Add Channel</button>
+                </div>
+                <table>
+                    <thead>
+                        <tr>
+                            <th>ENABLE</th>
+                            <th>NAME</th>
+                            <th>FREQUENCY</th>
+                            <th>UDP PORT</th>
+                            <th>SQUELCH</th>
+                            <th>STREAMING</th>
+                            <th>ACTIONS</th>
+                        </tr>
+                    </thead>
+                    <tbody id="channels-list-tbody"></tbody>
+                </table>
+            </div>
+        </div>
+        <div id="page-outputs" class="page hidden">
+            <div class="card">
+                <h2>File Output</h2>
+                <form id="output-form">
+                    <div class="form-group">
+                        <label><input type="checkbox" id="file-output-enabled"> Enable File Output</label>
+                    </div>
+                    <div class="form-group">
+                        <label>Directory: *</label>
+                        <input type="text" id="output-directory" name="directory" placeholder="/opt/boondock/airband_capture/recordings">
+                        <small>Directory where audio files will be stored. Must exist.</small>
+                    </div>
+                    <div class="form-group">
+                        <label>Filename Template: *</label>
+                        <input type="text" id="output-filename" name="filename_template" placeholder="Channel">
+                        <small>File name prefix. Date and time will be appended automatically.</small>
+                    </div>
+                    <button type="submit" class="btn btn-success">Save Output Configuration</button>
+                </form>
+            </div>
+        </div>
+        <div id="page-config" class="page hidden">
+            <div class="card">
+                <h2>Configuration File Management</h2>
+                <div class="form-group">
+                    <label>Configuration File Path</label>
+                    <input type="text" id="config-path" name="config_path" placeholder="/usr/local/etc/boondock_airband.conf">
+                    <small>Path to the configuration file. Changes require application restart.</small>
+                </div>
+                <div style="margin-bottom: 15px;">
+                    <button class="btn btn-primary" onclick="loadConfigInfo()">Load Current Path</button>
+                    <button class="btn btn-success" onclick="saveConfigPath()" style="margin-left: 10px;">Save Path</button>
+                </div>
+                <div style="border-top: 1px solid #e0e0e0; padding-top: 20px; margin-top: 20px;">
+                    <h3>Download Configuration</h3>
+                    <p>Download the current configuration file to your computer.</p>
+                    <button class="btn btn-primary" onclick="downloadConfig()">Download Config</button>
+                </div>
+                <div style="border-top: 1px solid #e0e0e0; padding-top: 20px; margin-top: 20px;">
+                    <h3>Upload Configuration</h3>
+                    <p>Upload a new configuration file to replace the current one.</p>
+                    <input type="file" id="config-upload" accept=".conf,.txt" style="margin-bottom: 10px;">
+                    <br>
+                    <button class="btn btn-success" onclick="uploadConfig()">Upload Config</button>
+                    <div id="config-upload-status" style="margin-top: 10px; padding: 10px; border-radius: 4px; display: none;"></div>
+                </div>
+            </div>
+        </div>
+    </div>
+    <div class="footer" style="background: white; padding: 20px; margin-top: 40px; border-top: 1px solid #e0e0e0; text-align: center; color: #666;">
+        <p>Copyright &copy; Boondock Technologies 2026 | <a href="https://www.boondockecho.com" target="_blank" style="color: #0066cc; text-decoration: none;">www.boondockecho.com</a></p>
+    </div>
+    <script>
+        var currentPage = "home";
+        var statusInterval;
+        
+        document.querySelectorAll(".nav-link").forEach(function(link) {
+            link.addEventListener("click", function(e) {
+                e.preventDefault();
+                var page = e.target.getAttribute("data-page");
+                showPage(page);
+            });
+        });
+        
+        function showPage(page) {
+            document.querySelectorAll(".page").forEach(function(p) { p.classList.add("hidden"); });
+            document.querySelectorAll(".nav-link").forEach(function(l) { l.classList.remove("active"); });
+            document.getElementById("page-" + page).classList.remove("hidden");
+            var selector = "[data-page=\"" + page + "\"]";
+            document.querySelector(selector).classList.add("active");
+            currentPage = page;
+            
+            if (page === "home") {
+                startStatusPolling();
+            } else {
+                stopStatusPolling();
+                if (page === "recordings") {
+                    loadRecordings();
+                } else if (page === "channels") {
+                    loadChannels();
+                } else if (page === "device") {
+                    loadDevice();
+                } else if (page === "config") {
+                    loadConfigInfo();
+                }
+            }
+        }
+        
+        function startStatusPolling() {
+            if (statusInterval) clearInterval(statusInterval);
+            updateStatus();
+            statusInterval = setInterval(updateStatus, 1000);
+        }
+        
+        function stopStatusPolling() {
+            if (statusInterval) {
+                clearInterval(statusInterval);
+                statusInterval = null;
+            }
+        }
+        
+        function updateStatus() {
+            fetch("/api/status")
+                .then(function(r) { return r.json(); })
+                .then(function(data) {
+                    var tbody = document.getElementById("channels-tbody");
+                    tbody.innerHTML = "";
+                    data.channels.forEach(function(ch) {
+                        var row = document.createElement("tr");
+                        var signalPercent = Math.max(0, Math.min(100, (ch.signal_level + 30) / 0.3));
+                        var label = ch.label || ("Channel " + ch.channel);
+                        var statusMark = ch.status === "signal" ? "*" : "";
+                        row.innerHTML = "<td>" + label + " | Ch #" + ch.channel + " | " + ch.frequency + " MHz | UDP: " + (6001 + ch.channel) + "</td>" +
+                            "<td>" + ch.signal_level.toFixed(1) + "/" + ch.noise_level.toFixed(1) + statusMark + "</td>" +
+                            "<td>" + ch.snr.toFixed(1) + " dB</td>" +
+                            "<td><div class=\"signal-bar\" style=\"width: " + signalPercent + "%; height: 20px;\"></div> " + ch.signal_level.toFixed(1) + " dB</td>" +
+                            "<td class=\"status-enabled\">Enabled</td>";
+                        tbody.appendChild(row);
+                    });
+                    document.getElementById("channels-count").textContent = data.channels.length;
+                })
+                .catch(function(err) { console.error("Status update error:", err); });
+            
+            // Also update errors
+            updateErrors();
+        }
+        
+        function updateErrors() {
+            fetch("/api/errors")
+                .then(function(r) { return r.json(); })
+                .then(function(data) {
+                    var errorsCard = document.getElementById("errors-card");
+                    var errorsList = document.getElementById("errors-list");
+                    
+                    if (data.errors && data.errors.length > 0) {
+                        errorsCard.style.display = "block";
+                        errorsList.innerHTML = "";
+                        data.errors.forEach(function(err) {
+                            var p = document.createElement("p");
+                            p.style.cssText = "margin: 5px 0; padding: 8px; background: white; border-left: 3px solid #dc3545; border-radius: 4px;";
+                            p.textContent = err;
+                            errorsList.appendChild(p);
+                        });
+                    } else {
+                        errorsCard.style.display = "none";
+                    }
+                })
+                .catch(function(err) { console.error("Errors load error:", err); });
+        }
+        
+        function clearErrors() {
+            fetch("/api/errors", { method: "DELETE" })
+                .then(function() {
+                    updateErrors();
+                })
+                .catch(function(err) { console.error("Clear errors error:", err); });
+        }
+        
+        function loadRecordings() {
+            fetch("/api/recordings")
+                .then(function(r) { return r.json(); })
+                .then(function(data) {
+                    var tbody = document.getElementById("recordings-tbody");
+                    tbody.innerHTML = "";
+                    data.recordings.forEach(function(rec) {
+                        var row = document.createElement("tr");
+                        var sizeMB = (rec.size / 1024 / 1024).toFixed(2);
+                        row.innerHTML = "<td>" + rec.datetime + "</td>" +
+                            "<td>" + sizeMB + " MB</td>" +
+                            "<td>Channel</td>" +
+                            "<td><audio controls style=\"width: 200px;\"><source src=\"/recordings/" + encodeURIComponent(rec.filename) + "\" type=\"audio/mpeg\"></audio></td>" +
+                            "<td><button class=\"btn btn-primary\" onclick=\"downloadRecording('" + rec.filename + "')\">Download</button></td>";
+                        tbody.appendChild(row);
+                    });
+                })
+                .catch(function(err) { console.error("Recordings load error:", err); });
+        }
+        
+        function loadChannels() {
+            fetch("/api/status")
+                .then(function(r) { return r.json(); })
+                .then(function(data) {
+                    var tbody = document.getElementById("channels-list-tbody");
+                    tbody.innerHTML = "";
+                    data.channels.forEach(function(ch) {
+                        var row = document.createElement("tr");
+                        var label = ch.label || ("Channel " + ch.channel);
+                        row.innerHTML = "<td><input type=\"checkbox\" checked></td>" +
+                            "<td>" + label + "</td>" +
+                            "<td>" + ch.frequency + " MHz</td>" +
+                            "<td>" + (6001 + ch.channel) + "</td>" +
+                            "<td>-20 dB</td>" +
+                            "<td class=\"status-enabled\">Enabled</td>" +
+                            "<td><button class=\"btn btn-primary\" onclick=\"editChannel(" + ch.channel + ")\">Edit</button></td>";
+                        tbody.appendChild(row);
+                    });
+                })
+                .catch(function(err) { console.error("Channels load error:", err); });
+        }
+        
+        function loadDevice() {
+            fetch("/api/device")
+                .then(function(r) { return r.json(); })
+                .then(function(data) {
+                    if (data.devices && data.devices.length > 0) {
+                        var dev = data.devices[0];
+                        document.getElementById("device-mode").value = dev.mode;
+                    }
+                })
+                .catch(function(err) { console.error("Device load error:", err); });
+        }
+        
+        function refreshRecordings() {
+            loadRecordings();
+        }
+        
+        function addChannel() {
+            alert("Add channel functionality coming soon");
+        }
+        
+        function editChannel(id) {
+            alert("Edit channel " + id + " functionality coming soon");
+        }
+        
+        function downloadRecording(filename) {
+            window.location.href = "/recordings/" + encodeURIComponent(filename);
+        }
+        
+        function loadConfigInfo() {
+            fetch("/api/config/info")
+                .then(function(r) { return r.json(); })
+                .then(function(data) {
+                    if (data.config_path) {
+                        document.getElementById("config-path").value = data.config_path;
+                    }
+                })
+                .catch(function(err) { console.error("Config info load error:", err); });
+        }
+        
+        function saveConfigPath() {
+            var path = document.getElementById("config-path").value;
+            if (!path) {
+                alert("Please enter a configuration file path");
+                return;
+            }
+            
+            fetch("/api/config/path", {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ config_path: path })
+            })
+                .then(function(r) { return r.json(); })
+                .then(function(data) {
+                    if (data.status === "success") {
+                        alert("Configuration path saved. Application restart required for changes to take effect.");
+                    } else {
+                        alert("Failed to save configuration path: " + (data.error || "Unknown error"));
+                    }
+                })
+                .catch(function(err) { 
+                    console.error("Save config path error:", err);
+                    alert("Error saving configuration path");
+                });
+        }
+        
+        function downloadConfig() {
+            window.location.href = "/api/config/download";
+        }
+        
+        function uploadConfig() {
+            var fileInput = document.getElementById("config-upload");
+            var file = fileInput.files[0];
+            if (!file) {
+                alert("Please select a configuration file to upload");
+                return;
+            }
+            
+            var statusDiv = document.getElementById("config-upload-status");
+            statusDiv.style.display = "block";
+            statusDiv.style.background = "#f8f8f8";
+            statusDiv.textContent = "Uploading...";
+            
+            var reader = new FileReader();
+            reader.onload = function(e) {
+                var content = e.target.result;
+                
+                fetch("/api/config/upload", {
+                    method: "POST",
+                    headers: { "Content-Type": "text/plain" },
+                    body: content
+                })
+                    .then(function(r) { return r.json(); })
+                    .then(function(data) {
+                        if (data.status === "success") {
+                            statusDiv.style.background = "#d4edda";
+                            statusDiv.style.color = "#155724";
+                            statusDiv.textContent = "Configuration uploaded successfully! Application restart required.";
+                            fileInput.value = "";
+                        } else {
+                            statusDiv.style.background = "#f8d7da";
+                            statusDiv.style.color = "#721c24";
+                            statusDiv.textContent = "Upload failed: " + (data.error || "Unknown error");
+                        }
+                    })
+                    .catch(function(err) {
+                        console.error("Upload config error:", err);
+                        statusDiv.style.background = "#f8d7da";
+                        statusDiv.style.color = "#721c24";
+                        statusDiv.textContent = "Error uploading configuration file";
+                    });
+            };
+            reader.readAsText(file);
+        }
+        
+        showPage("home");
+    </script>
+</body>
+</html>

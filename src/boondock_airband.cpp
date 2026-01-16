@@ -60,6 +60,7 @@
 #include "logging.h"
 #include "boondock_airband.h"
 #include "squelch.h"
+#include "web_server.h"
 
 #ifdef WITH_PROFILING
 #include "gperftools/profiler.h"
@@ -305,6 +306,8 @@ int next_device(demod_params_t* params, int current) {
     return params->device_start;
 }
 
+static int count_devices_running(void);
+
 void* demodulate(void* params) {
     assert(params != NULL);
     demod_params_t* demod_params = (demod_params_t*)params;
@@ -376,8 +379,7 @@ void* demodulate(void* params) {
     struct timeval ts, te;
     gettimeofday(&ts, NULL);
 #endif /* DEBUG */
-    struct timeval last_json_time;
-    gettimeofday(&last_json_time, NULL);
+    // JSON status and health metrics removed - available via web interface instead
     size_t available;
     int device_num = demod_params->device_start;
     while (true) {
@@ -684,46 +686,8 @@ void* demodulate(void* params) {
             ts.tv_usec = te.tv_usec;
 #endif /* DEBUG */
             
-            // Print JSON status every 200ms (optimized to minimize performance impact)
-            struct timeval current_time;
-            gettimeofday(&current_time, NULL);
-            long elapsed_ms = ((current_time.tv_sec - last_json_time.tv_sec) * 1000) + 
-                             ((current_time.tv_usec - last_json_time.tv_usec) / 1000);
-            if (elapsed_ms >= 200) {
-                // Build JSON in a single buffer to minimize printf calls and potential blocking
-                char json_buffer[4096];  // Large enough for multiple channels
-                int pos = snprintf(json_buffer, sizeof(json_buffer), "{\"device\":%d,\"channels\":[", device_num);
-                
-                for (int i = 0; i < dev->channel_count && pos < (int)(sizeof(json_buffer) - 200); i++) {
-                    channel_t* channel = dev->channels + i;
-                    freq_t* fparms = channel->freqlist + channel->freq_idx;
-                    float freq_mhz = fparms->frequency / 1000000.0;
-                    float signal_dbfs = level_to_dBFS(fparms->squelch.signal_level());
-                    float noise_dbfs = level_to_dBFS(fparms->squelch.noise_level());
-                    const char* status_str = (channel->axcindicate == SIGNAL) ? "signal" : 
-                                            (channel->axcindicate == AFC_UP) ? "afc_up" :
-                                            (channel->axcindicate == AFC_DOWN) ? "afc_down" : "no_signal";
-                    
-                    // Simple label handling - just use label as-is (most labels don't have special chars)
-                    const char* label = fparms->label ? fparms->label : "";
-                    
-                    if (i > 0) {
-                        pos += snprintf(json_buffer + pos, sizeof(json_buffer) - pos, ",");
-                    }
-                    pos += snprintf(json_buffer + pos, sizeof(json_buffer) - pos,
-                           "{\"channel\":%d,\"frequency\":%.3f,\"label\":\"%s\",\"signal_level\":%.1f,\"noise_level\":%.1f,\"status\":\"%s\"}",
-                           i, freq_mhz, label, signal_dbfs, noise_dbfs, status_str);
-                }
-                
-                pos += snprintf(json_buffer + pos, sizeof(json_buffer) - pos, "]}\n");
-                
-                // Single write to minimize blocking - use write() for better control, but printf is usually fine
-                // Set stdout to non-blocking would be ideal but requires more setup
-                fputs(json_buffer, stdout);
-                fflush(stdout);  // Ensure it's written immediately
-                
-                last_json_time = current_time;
-            }
+            // JSON status and health metrics are now available via web interface
+            // No need to print to terminal - reduces verbosity
             
             demod_params->mp3_signal->send();
             dev->row++;
@@ -750,6 +714,7 @@ void usage() {
 #endif /* DEBUG */
     cout << "\t-e\t\t\tPrint messages to standard error (disables syslog logging)\n";
     cout << "\t-c <config_file_path>\tUse non-default configuration file\n\t\t\t\t(default: " << CFGFILE << ")\n\
+\t-p <port>\t\tWeb interface port (default: 5000)\n\
 \t-v\t\t\tDisplay version and exit\n";
     exit(EXIT_SUCCESS);
 }
@@ -775,7 +740,7 @@ int main(int argc, char* argv[]) {
 #pragma GCC diagnostic warning "-Wwrite-strings"
 
     int opt;
-    char optstring[16] = "efFhvc:";
+    char optstring[16] = "efFhvc:p:";
 
 #ifdef NFM
     strcat(optstring, "Q");
@@ -787,6 +752,7 @@ int main(int argc, char* argv[]) {
 
     int foreground = 0;  // daemonize
     int do_syslog = 1;
+    int web_port = 5000;  // default web interface port
 
     while ((opt = getopt(argc, argv, optstring)) != -1) {
         switch (opt) {
@@ -815,6 +781,13 @@ int main(int argc, char* argv[]) {
                 break;
             case 'c':
                 cfgfile = optarg;
+                break;
+            case 'p':
+                web_port = atoi(optarg);
+                if (web_port < 1 || web_port > 65535) {
+                    cerr << "Invalid web port: " << optarg << " (must be 1-65535)\n";
+                    exit(EXIT_FAILURE);
+                }
                 break;
             case 'v':
                 cout << "Boondock-Airband version " << BOONDOCK_AIRBAND_VERSION << "\n";
@@ -967,6 +940,18 @@ int main(int argc, char* argv[]) {
 
     log(LOG_INFO, "Boondock-Airband version %s starting\n", BOONDOCK_AIRBAND_VERSION);
 
+    // Set config file path for web server
+    web_server_set_config_path(cfgfile);
+
+    // Startup the web server early - before device initialization
+    // This ensures web interface is available even if devices fail
+    if (web_server_start(web_port) < 0) {
+        cerr << "FATAL: Failed to start web interface on port " << web_port << "\n";
+        cerr << "Error: " << strerror(errno) << "\n";
+        cerr << "Cannot continue without web interface. Exiting.\n";
+        error();
+    }
+
     if (!foreground) {
         int pid1, pid2;
         if ((pid1 = fork()) == -1) {
@@ -1016,44 +1001,65 @@ int main(int argc, char* argv[]) {
         for (int k = 0; k < channel->output_count; k++) {
             output_t* output = channel->outputs + k;
             if (!init_output(channel, output)) {
-                cerr << "Failed to initialize mixer " << i << " output " << k << " - aborting\n";
-                error();
+                char err_msg[256];
+                snprintf(err_msg, sizeof(err_msg), "Failed to initialize mixer %d output %d", i, k);
+                log(LOG_ERR, "%s\n", err_msg);
+                web_server_add_error(err_msg);
             }
         }
     }
     for (int i = 0; i < device_count; i++) {
         device_t* dev = devices + i;
+        bool device_ok = true;
+        
         for (int j = 0; j < dev->channel_count; j++) {
             channel_t* channel = dev->channels + j;
 
             for (int k = 0; k < channel->output_count; k++) {
                 output_t* output = channel->outputs + k;
                 if (!init_output(channel, output)) {
-                    cerr << "Failed to initialize device " << i << " channel " << j << " output " << k << " - aborting\n";
-                    error();
+                    char err_msg[256];
+                    snprintf(err_msg, sizeof(err_msg), "Failed to initialize device %d channel %d output %d", i, j, k);
+                    log(LOG_ERR, "%s\n", err_msg);
+                    web_server_add_error(err_msg);
+                    device_ok = false;
                 }
             }
         }
+        
         if (input_init(dev->input) != 0 || dev->input->state != INPUT_INITIALIZED) {
+            char err_msg[512];
             if (errno != 0) {
-                cerr << "Failed to initialize input device " << i << ": " << strerror(errno) << " - aborting\n";
+                snprintf(err_msg, sizeof(err_msg), "Failed to initialize input device %d: %s", i, strerror(errno));
+                log(LOG_ERR, "%s\n", err_msg);
             } else {
-                cerr << "Failed to initialize input device " << i << " - aborting\n";
+                snprintf(err_msg, sizeof(err_msg), "Failed to initialize input device %d", i);
+                log(LOG_ERR, "%s\n", err_msg);
             }
-            error();
-        }
-        if (input_start(dev->input) != 0) {
-            cerr << "Failed to start input on device " << i << ": " << strerror(errno) << " - aborting\n";
-            error();
-        }
-        if (dev->mode == R_SCAN) {
+            web_server_add_error(err_msg);
+            device_ok = false;
+        } else if (input_start(dev->input) != 0) {
+            char err_msg[512];
+            snprintf(err_msg, sizeof(err_msg), "Failed to start input on device %d: %s", i, strerror(errno));
+            log(LOG_ERR, "%s\n", err_msg);
+            web_server_add_error(err_msg);
+            device_ok = false;
+        } else if (dev->mode == R_SCAN) {
             // FIXME: set errno
             if (pthread_mutex_init(&dev->tag_queue_lock, NULL) != 0) {
-                cerr << "Failed to initialize mutex - aborting\n";
-                error();
+                char err_msg[256];
+                snprintf(err_msg, sizeof(err_msg), "Failed to initialize mutex for device %d", i);
+                log(LOG_ERR, "%s\n", err_msg);
+                web_server_add_error(err_msg);
+                device_ok = false;
+            } else {
+                // FIXME: not needed when freq_count == 1?
+                pthread_create(&dev->controller_thread, NULL, &controller_thread, dev);
             }
-            // FIXME: not needed when freq_count == 1?
-            pthread_create(&dev->controller_thread, NULL, &controller_thread, dev);
+        }
+        
+        if (!device_ok) {
+            log(LOG_WARNING, "Device %d initialization failed, but continuing...\n", i);
         }
     }
 
@@ -1063,8 +1069,12 @@ int main(int argc, char* argv[]) {
         timeout--;
     }
     if ((devices_running = count_devices_running()) != device_count) {
-        log(LOG_ERR, "%d device(s) failed to initialize - aborting\n", device_count - devices_running);
-        error();
+        char err_msg[256];
+        int failed_count = device_count - devices_running;
+        snprintf(err_msg, sizeof(err_msg), "%d device(s) failed to initialize", failed_count);
+        log(LOG_ERR, "%s - continuing anyway\n", err_msg);
+        web_server_add_error(err_msg);
+        // Don't abort - continue so web interface can show errors and allow reconfiguration
     }
     if (tui) {
         printf("\e[1;1H\e[2J");
@@ -1142,7 +1152,7 @@ int main(int argc, char* argv[]) {
 
     sincosf_lut_init();
 
-    // Startup the demod threads
+    // Startup the demod threads (web server already started earlier)
     for (int i = 0; i < demod_thread_count; i++) {
         pthread_create(&demod_threads[i], NULL, &demodulate, &demod_params[i]);
     }
@@ -1153,6 +1163,10 @@ int main(int argc, char* argv[]) {
     }
 
     log(LOG_INFO, "Cleaning up\n");
+    
+    // Stop web server
+    web_server_stop();
+    
     for (int i = 0; i < device_count; i++) {
         if (devices[i].mode == R_SCAN)
             pthread_join(devices[i].controller_thread, NULL);
