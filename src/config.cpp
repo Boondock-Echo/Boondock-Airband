@@ -121,6 +121,12 @@ static int parse_outputs(libconfig::Setting& outs, channel_t* channel, int i, in
             fdata->append = (!outs[o].exists("append")) || (bool)(outs[o]["append"]);
             fdata->split_on_transmission = outs[o].exists("split_on_transmission") ? (bool)(outs[o]["split_on_transmission"]) : false;
             fdata->include_freq = outs[o].exists("include_freq") ? (bool)(outs[o]["include_freq"]) : false;
+            fdata->device_index = i;
+            fdata->channel_index = parsing_mixers ? -1 : j;  // -1 for mixers
+            fdata->metadata_f = NULL;
+            fdata->last_metadata_log_sec = 0;
+            fdata->last_metadata_flush.tv_sec = 0;
+            fdata->last_metadata_flush.tv_usec = 0;
 
             channel->outputs[oo].has_mp3_output = true;
 
@@ -159,6 +165,12 @@ static int parse_outputs(libconfig::Setting& outs, channel_t* channel, int i, in
             fdata->append = (!outs[o].exists("append")) || (bool)(outs[o]["append"]);
             fdata->split_on_transmission = outs[o].exists("split_on_transmission") ? (bool)(outs[o]["split_on_transmission"]) : false;
             fdata->include_freq = outs[o].exists("include_freq") ? (bool)(outs[o]["include_freq"]) : false;
+            fdata->device_index = i;
+            fdata->channel_index = j;
+            fdata->metadata_f = NULL;
+            fdata->last_metadata_log_sec = 0;
+            fdata->last_metadata_flush.tv_sec = 0;
+            fdata->last_metadata_flush.tv_usec = 0;
             channel->needs_raw_iq = channel->has_iq_outputs = 1;
 
             if (fdata->continuous && fdata->split_on_transmission) {
@@ -199,6 +211,10 @@ static int parse_outputs(libconfig::Setting& outs, channel_t* channel, int i, in
             udp_stream_data* sdata = (udp_stream_data*)channel->outputs[oo].data;
 
             sdata->continuous = outs[o].exists("continuous") ? (bool)(outs[o]["continuous"]) : false;
+            sdata->enable_headers = outs[o].exists("udp_headers") ? (bool)(outs[o]["udp_headers"]) : false;
+            sdata->enable_chunking = outs[o].exists("udp_chunking") ? (bool)(outs[o]["udp_chunking"]) : true;
+            // For devices: j is channel index, for mixers: i is mixer index
+            sdata->channel_id = parsing_mixers ? i : j;
 
             if (outs[o].exists("dest_address")) {
                 sdata->dest_address = strdup(outs[o]["dest_address"]);

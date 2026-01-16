@@ -85,6 +85,7 @@ bool log_scan_activity = false;
 char* stats_filepath = NULL;
 size_t fft_size_log = DEFAULT_FFT_SIZE_LOG;
 size_t fft_size = 1 << fft_size_log;
+int file_chunk_duration_minutes = 60;  // Default: 60 minutes
 
 #ifdef NFM
 float alpha = exp(-1.0f / (WAVE_RATE * 2e-4));
@@ -99,10 +100,17 @@ char* debug_path;
 void sighandler(int sig) {
     // Async-signal-safe: only set flag, don't call log() or other non-safe functions
     // Use write() directly to stderr if we need to log (write is async-signal-safe)
-    (void)sig;  // Suppress unused parameter warning
-    const char msg[] = "Got signal, exiting...\n";
-    write(STDERR_FILENO, msg, sizeof(msg) - 1);
-    do_exit = 1;
+    if (sig == SIGHUP) {
+        // SIGHUP triggers configuration reload
+        do_reload = 1;
+        const char msg[] = "Got SIGHUP, reloading configuration...\n";
+        write(STDERR_FILENO, msg, sizeof(msg) - 1);
+    } else {
+        // Other signals cause exit
+        const char msg[] = "Got signal, exiting...\n";
+        write(STDERR_FILENO, msg, sizeof(msg) - 1);
+        do_exit = 1;
+    }
 }
 
 void* controller_thread(void* params) {
@@ -281,7 +289,7 @@ bool init_output(channel_t* channel, output_t* output) {
         shout_setup((icecast_data*)(output->data), channel->mode);
     } else if (output->type == O_UDP_STREAM) {
         udp_stream_data* sdata = (udp_stream_data*)(output->data);
-        if (!udp_stream_init(sdata, channel->mode, (size_t)WAVE_BATCH * sizeof(float))) {
+        if (!udp_stream_init(sdata, channel->mode, (size_t)WAVE_BATCH * sizeof(float), sdata->channel_id)) {
             return false;
         }
 #ifdef WITH_PULSEAUDIO
@@ -984,6 +992,14 @@ int main(int argc, char* argv[]) {
             log_scan_activity = true;
         if (root.exists("stats_filepath"))
             stats_filepath = strdup(root["stats_filepath"]);
+        if (root.exists("file_chunk_duration_minutes")) {
+            file_chunk_duration_minutes = (int)root["file_chunk_duration_minutes"];
+            // Validate range: 5-60 minutes, in 5-minute increments
+            if (file_chunk_duration_minutes < 5 || file_chunk_duration_minutes > 60 || (file_chunk_duration_minutes % 5 != 0)) {
+                cerr << "Configuration error: file_chunk_duration_minutes must be between 5 and 60, in 5-minute increments\n";
+                error();
+            }
+        }
 #ifdef NFM
         if (root.exists("tau"))
             alpha = ((int)root["tau"] == 0 ? 0.0f : exp(-1.0f / (WAVE_RATE * 1e-6 * (int)root["tau"])));

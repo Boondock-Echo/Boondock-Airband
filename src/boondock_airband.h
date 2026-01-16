@@ -129,12 +129,23 @@ struct icecast_data {
     shout_t* shout;
 };
 
+// Metadata entry structure (one per second)
+struct metadata_entry {
+    time_t timestamp;
+    int channel_id;
+    std::string channel_name;
+    int frequency_hz;
+    float signal_dbfs;
+    float snr_db;
+};
+
 struct file_data {
     std::string basedir;
     std::string basename;
     std::string suffix;
     std::string file_path;
     std::string file_path_tmp;
+    std::string metadata_file_path;  // Path to metadata .txt file
     bool dated_subdirectories;
     bool continuous;
     bool append;
@@ -142,15 +153,33 @@ struct file_data {
     bool include_freq;
     timeval open_time;
     timeval last_write_time;
+    time_t last_metadata_log_sec;  // Last second we logged metadata
+    timeval last_metadata_flush;   // Last time we flushed metadata buffer
+    std::vector<metadata_entry> metadata_buffer;  // In-memory buffer for metadata
     FILE* f;
+    FILE* metadata_f;  // Metadata file handle
+    int device_index;   // Device index for metadata
+    int channel_index;  // Channel index for metadata
     enum output_type type;
 };
+
+// UDP packet header structure (10 bytes)
+struct udp_packet_header {
+    uint16_t channel_id;      // Channel ID (index within device)
+    uint32_t frequency_hz;    // Frequency in Hz
+    int16_t signal_dbfs;      // Signal strength in dBFS (range: -120 to 0)
+    int16_t snr_db;           // SNR in dB (range: -50 to 50)
+} __attribute__((packed));
 
 struct udp_stream_data {
     float* stereo_buffer;
     size_t stereo_buffer_len;
 
     bool continuous;
+    bool enable_headers;      // Enable UDP packet headers (default: false)
+    bool enable_chunking;     // Enable packet chunking to MTU size (default: true)
+    int channel_id;           // Channel ID for headers
+    
     const char* dest_address;
     const char* dest_port;
 
@@ -354,6 +383,7 @@ extern int device_count, mixer_count;
 extern int shout_metadata_delay;
 extern volatile int do_exit, device_opened, do_reload;
 extern float alpha;
+extern int file_chunk_duration_minutes;  // Global file chunking duration (5-60 minutes, default 60)
 extern device_t* devices;
 extern mixer_t* mixers;
 
@@ -389,9 +419,9 @@ int parse_devices(libconfig::Setting& devs);
 int parse_mixers(libconfig::Setting& mx);
 
 // udp_stream.cpp
-bool udp_stream_init(udp_stream_data* sdata, mix_modes mode, size_t len);
-void udp_stream_write(udp_stream_data* sdata, const float* data, size_t len);
-void udp_stream_write(udp_stream_data* sdata, const float* data_left, const float* data_right, size_t len);
+bool udp_stream_init(udp_stream_data* sdata, mix_modes mode, size_t len, int channel_id);
+void udp_stream_write(udp_stream_data* sdata, channel_t* channel, const float* data, size_t len);
+void udp_stream_write(udp_stream_data* sdata, channel_t* channel, const float* data_left, const float* data_right, size_t len);
 void udp_stream_shutdown(udp_stream_data* sdata);
 
 #ifdef WITH_PULSEAUDIO

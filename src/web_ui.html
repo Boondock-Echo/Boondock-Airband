@@ -42,6 +42,10 @@
         .apply-changes-btn { position: absolute; top: 20px; right: 20px; padding: 10px 20px; background: #28a745; color: white; border: none; border-radius: 4px; cursor: pointer; font-size: 14px; font-weight: 600; }
         .apply-changes-btn:disabled { background: #6c757d; cursor: not-allowed; opacity: 0.6; }
         .apply-changes-btn:hover:not(:disabled) { background: #218838; }
+        .tab-button { padding: 10px 20px; background: #f0f0f0; border: none; border-bottom: 2px solid transparent; cursor: pointer; font-size: 14px; margin-right: 5px; }
+        .tab-button.active { background: white; border-bottom-color: #0066cc; color: #0066cc; font-weight: 600; }
+        .tab-button:hover { background: #e8e8e8; }
+        .channel-tab-content { display: block; }
     </style>
 </head>
 <body>
@@ -308,92 +312,63 @@
                     <span class="close" onclick="closeChannelModal()" style="color: #aaa; float: right; font-size: 28px; font-weight: bold; cursor: pointer;">&times;</span>
                 </div>
                 <form id="channel-form" onsubmit="saveChannel(event)">
-                    <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 15px;">
-                        <!-- Basic Settings -->
-                        <div class="form-group">
-                            <label>Channel Name/Label *</label>
-                            <input type="text" id="channel-label" name="label" required placeholder="e.g., NOAA 162.400">
-                        </div>
-                        <div class="form-group">
-                            <label>Frequency (MHz) *</label>
-                            <input type="number" id="channel-freq" name="freq" step="0.001" required placeholder="162.400">
-                        </div>
-                        <div class="form-group">
-                            <label>Modulation *</label>
-                            <select id="channel-modulation" name="modulation" required>
-                                <option value="am">AM</option>
-                                <option value="nfm">NFM</option>
-                            </select>
-                        </div>
-                        <div class="form-group">
-                            <label><input type="checkbox" id="channel-enabled" name="enabled" checked> Channel Enabled</label>
-                        </div>
-                        
-                        <!-- Audio Processing -->
-                        <div class="form-group">
-                            <label>Highpass Filter (Hz)</label>
-                            <input type="number" id="channel-highpass" name="highpass" value="100" placeholder="100">
-                            <small>Default: 100 Hz</small>
-                        </div>
-                        <div class="form-group">
-                            <label>Lowpass Filter (Hz)</label>
-                            <input type="number" id="channel-lowpass" name="lowpass" value="2500" placeholder="2500">
-                            <small>Default: 2500 Hz</small>
-                        </div>
-                        <div class="form-group">
-                            <label>Bandwidth (Hz)</label>
-                            <input type="number" id="channel-bandwidth" name="bandwidth" value="5000" placeholder="5000">
-                            <small>For NFM, typically 5000 Hz</small>
-                        </div>
-                        <div class="form-group">
-                            <label>Amplification Factor</label>
-                            <input type="number" id="channel-ampfactor" name="ampfactor" step="0.1" value="1.0" placeholder="1.0">
-                            <small>Default: 1.0</small>
-                        </div>
-                        
-                        <!-- Squelch Settings -->
-                        <div class="form-group">
-                            <label>Squelch Threshold (dBFS)</label>
-                            <input type="number" id="channel-squelch-threshold" name="squelch_threshold" step="0.1" placeholder="0 (auto)">
-                            <small>0 = auto, negative values only</small>
-                        </div>
-                        <div class="form-group">
-                            <label>Squelch SNR Threshold (dB)</label>
-                            <input type="number" id="channel-squelch-snr" name="squelch_snr_threshold" step="0.1" placeholder="0 (disabled)">
-                            <small>0 = disabled, -1 = use default</small>
-                        </div>
-                        
-                        <!-- Advanced Settings -->
-                        <div class="form-group">
-                            <label>AFC (Auto Frequency Control)</label>
-                            <input type="number" id="channel-afc" name="afc" min="0" max="255" value="0" placeholder="0">
-                            <small>0 = disabled, 1-255 = sensitivity</small>
-                        </div>
-                        <div class="form-group">
-                            <label>Notch Filter Frequency (Hz)</label>
-                            <input type="number" id="channel-notch" name="notch" step="0.1" placeholder="0 (disabled)">
-                            <small>Remove specific frequency (e.g., 60 Hz hum)</small>
-                        </div>
-                        <div class="form-group">
-                            <label>Notch Filter Q Factor</label>
-                            <input type="number" id="channel-notch-q" name="notch_q" step="0.1" value="10.0" placeholder="10.0">
-                            <small>Default: 10.0</small>
-                        </div>
-                        <div class="form-group">
-                            <label>CTCSS Tone (Hz)</label>
-                            <input type="number" id="channel-ctcss" name="ctcss" step="0.1" placeholder="0 (disabled)">
-                            <small>Sub-audible tone frequency</small>
+                    <!-- Tab Navigation -->
+                    <div style="border-bottom: 2px solid #e0e0e0; margin-bottom: 20px;">
+                        <button type="button" class="tab-button active" onclick="showChannelTab('general')" id="tab-general-btn">General</button>
+                        <button type="button" class="tab-button" onclick="showChannelTab('outputs')" id="tab-outputs-btn">Outputs</button>
+                        <button type="button" class="tab-button" onclick="showChannelTab('advanced')" id="tab-advanced-btn">Advanced</button>
+                        <button type="button" class="btn" onclick="resetChannelToDefaults()" style="float: right; background: #6c757d; color: white; margin-left: 10px;">Default</button>
+                    </div>
+                    
+                    <!-- General Tab -->
+                    <div id="tab-general" class="channel-tab-content">
+                        <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 15px;">
+                            <div class="form-group">
+                                <label>Channel Name/Label *</label>
+                                <input type="text" id="channel-label" name="label" required placeholder="e.g., NOAA 162.400">
+                            </div>
+                            <div class="form-group">
+                                <label>Frequency (MHz) *</label>
+                                <input type="number" id="channel-freq" name="freq" step="0.001" required placeholder="162.400">
+                            </div>
+                            <div class="form-group">
+                                <label>Modulation *</label>
+                                <select id="channel-modulation" name="modulation" required>
+                                    <option value="am">AM</option>
+                                    <option value="nfm">NFM</option>
+                                </select>
+                            </div>
+                            <div class="form-group">
+                                <label><input type="checkbox" id="channel-enabled" name="enabled" checked> Channel Enabled</label>
+                            </div>
+                            
+                            <!-- Squelch Settings -->
+                            <div class="form-group">
+                                <label>Squelch Threshold (dBFS)</label>
+                                <input type="number" id="channel-squelch-threshold" name="squelch_threshold" step="0.1" placeholder="0 (auto)">
+                                <small>0 = auto, negative values only</small>
+                            </div>
+                            <div class="form-group">
+                                <label>Squelch SNR Threshold (dB)</label>
+                                <input type="number" id="channel-squelch-snr" name="squelch_snr_threshold" step="0.1" placeholder="0 (disabled)">
+                                <small>0 = disabled, -1 = use default</small>
+                            </div>
+                            <div class="form-group">
+                                <label>CTCSS Tone (Hz)</label>
+                                <input type="number" id="channel-ctcss" name="ctcss" step="0.1" placeholder="0 (disabled)">
+                                <small>Sub-audible tone frequency</small>
+                            </div>
                         </div>
                     </div>
                     
-                    <!-- Outputs Section -->
-                    <div style="margin-top: 30px; border-top: 2px solid #e0e0e0; padding-top: 20px;">
+                    <!-- Outputs Tab -->
+                    <div id="tab-outputs" class="channel-tab-content" style="display: none;">
                         <h3>Outputs</h3>
                         
                         <!-- File Output (Recording) -->
                         <div style="background: #f8f8f8; padding: 15px; border-radius: 4px; margin-bottom: 15px;">
                             <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px;">
-                                <label><input type="checkbox" id="output-file-enabled" name="output_file_enabled" onchange="toggleOutputSection('file')"> Enable File Recording</label>
+                                <label><input type="checkbox" id="output-file-enabled" name="output_file_enabled" checked onchange="toggleOutputSection('file')"> Enable File Recording</label>
                             </div>
                             <div id="output-file-section" style="display: none;">
                                 <div class="form-group">
@@ -433,6 +408,14 @@
                                     <label><input type="checkbox" id="output-udp-continuous" name="output_udp_continuous"> Continuous Streaming</label>
                                     <small>Stream even when squelch is closed</small>
                                 </div>
+                                <div class="form-group">
+                                    <label><input type="checkbox" id="output-udp-headers" name="output_udp_headers"> Enable UDP Packet Headers</label>
+                                    <small>Include channel metadata (ID, frequency, signal strength, SNR) in each UDP packet</small>
+                                </div>
+                                <div class="form-group">
+                                    <label><input type="checkbox" id="output-udp-chunking" name="output_udp_chunking" checked> Enable MTU-Based Chunking</label>
+                                    <small>Split large packets to avoid fragmentation (enabled by default for optimal performance)</small>
+                                </div>
                             </div>
                         </div>
                         
@@ -470,6 +453,48 @@
                         </div>
                     </div>
                     
+                    <!-- Advanced Tab -->
+                    <div id="tab-advanced" class="channel-tab-content" style="display: none;">
+                        <h3>Advanced Settings</h3>
+                        <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 15px;">
+                            <div class="form-group">
+                                <label>Highpass Filter (Hz)</label>
+                                <input type="number" id="channel-highpass" name="highpass" value="100" placeholder="100">
+                                <small>Default: 100 Hz</small>
+                            </div>
+                            <div class="form-group">
+                                <label>Lowpass Filter (Hz)</label>
+                                <input type="number" id="channel-lowpass" name="lowpass" value="2500" placeholder="2500">
+                                <small>Default: 2500 Hz</small>
+                            </div>
+                            <div class="form-group">
+                                <label>Bandwidth (Hz)</label>
+                                <input type="number" id="channel-bandwidth" name="bandwidth" value="5000" placeholder="5000">
+                                <small>For NFM, typically 5000 Hz</small>
+                            </div>
+                            <div class="form-group">
+                                <label>Amplification Factor</label>
+                                <input type="number" id="channel-ampfactor" name="ampfactor" step="0.1" value="1.0" placeholder="1.0">
+                                <small>Default: 1.0</small>
+                            </div>
+                            <div class="form-group">
+                                <label>AFC (Auto Frequency Control)</label>
+                                <input type="number" id="channel-afc" name="afc" min="0" max="255" value="0" placeholder="0">
+                                <small>0 = disabled, 1-255 = sensitivity</small>
+                            </div>
+                            <div class="form-group">
+                                <label>Notch Filter Frequency (Hz)</label>
+                                <input type="number" id="channel-notch" name="notch" step="0.1" placeholder="0 (disabled)">
+                                <small>Remove specific frequency (e.g., 60 Hz hum)</small>
+                            </div>
+                            <div class="form-group">
+                                <label>Notch Filter Q Factor</label>
+                                <input type="number" id="channel-notch-q" name="notch_q" step="0.1" value="10.0" placeholder="10.0">
+                                <small>Default: 10.0</small>
+                            </div>
+                        </div>
+                    </div>
+                    
                     <div style="margin-top: 20px; display: flex; gap: 10px; justify-content: flex-end;">
                         <button type="button" class="btn" onclick="closeChannelModal()" style="background: #6c757d; color: white;">Cancel</button>
                         <button type="submit" class="btn btn-success">Save Channel</button>
@@ -482,22 +507,36 @@
         </div>
         <div id="page-outputs" class="page hidden">
             <div class="card">
-                <h2>File Output</h2>
+                <h2>Output Settings</h2>
                 <form id="output-form" onchange="markChange('outputs')">
-                    <div class="form-group">
-                        <label><input type="checkbox" id="file-output-enabled"> Enable File Output</label>
+                    <div style="border-bottom: 2px solid #e0e0e0; padding-bottom: 20px; margin-bottom: 20px;">
+                        <h3>File Recording Chunking</h3>
+                        <div class="form-group">
+                            <label>Audio File Chunk Duration: <span id="chunk-duration-value">60</span> minutes</label>
+                            <input type="range" id="file-chunk-duration" name="file_chunk_duration_minutes" 
+                                   min="5" max="60" step="5" value="60" 
+                                   oninput="document.getElementById('chunk-duration-value').textContent = this.value; markChange('outputs');"
+                                   style="width: 100%; margin-top: 10px;">
+                            <small>Controls how long each audio file chunk will be before creating a new file. Range: 5-60 minutes in 5-minute increments. Default: 60 minutes. This setting applies globally to all channels.</small>
+                        </div>
                     </div>
-                    <div class="form-group">
-                        <label>Directory: *</label>
-                        <input type="text" id="output-directory" name="directory" placeholder="/opt/boondock/airband_capture/recordings">
-                        <small>Directory where audio files will be stored. Must exist.</small>
+                    <div style="border-top: 2px solid #e0e0e0; padding-top: 20px;">
+                        <h3>File Output (Legacy)</h3>
+                        <div class="form-group">
+                            <label><input type="checkbox" id="file-output-enabled"> Enable File Output</label>
+                        </div>
+                        <div class="form-group">
+                            <label>Directory: *</label>
+                            <input type="text" id="output-directory" name="directory" placeholder="/opt/boondock/airband_capture/recordings">
+                            <small>Directory where audio files will be stored. Must exist.</small>
+                        </div>
+                        <div class="form-group">
+                            <label>Filename Template: *</label>
+                            <input type="text" id="output-filename" name="filename_template" placeholder="Channel">
+                            <small>File name prefix. Date and time will be appended automatically.</small>
+                        </div>
                     </div>
-                    <div class="form-group">
-                        <label>Filename Template: *</label>
-                        <input type="text" id="output-filename" name="filename_template" placeholder="Channel">
-                        <small>File name prefix. Date and time will be appended automatically.</small>
-                    </div>
-                    <button type="submit" class="btn btn-success">Save Output Configuration</button>
+                    <button type="button" class="btn btn-success" onclick="saveOutputSettings()">Save Output Settings</button>
                 </form>
             </div>
         </div>
@@ -597,6 +636,8 @@
                     loadDevice();
                     updateDeviceFields();
                     toggleCenterFreq();
+                } else if (page === "outputs") {
+                    loadOutputSettings();
                 } else if (page === "config") {
                     loadConfigInfo();
                 }
@@ -1022,6 +1063,73 @@
             loadRecordings();
         }
         
+        function showChannelTab(tabName) {
+            // Hide all tabs
+            document.querySelectorAll(".channel-tab-content").forEach(function(tab) {
+                tab.style.display = "none";
+            });
+            document.querySelectorAll(".tab-button").forEach(function(btn) {
+                btn.classList.remove("active");
+            });
+            
+            // Show selected tab
+            document.getElementById("tab-" + tabName).style.display = "block";
+            document.getElementById("tab-" + tabName + "-btn").classList.add("active");
+        }
+        
+        function resetChannelToDefaults() {
+            if (!confirm("Reset channel to default settings? This will clear all advanced features and keep only basic settings.")) {
+                return;
+            }
+            
+            // Reset to minimal defaults
+            document.getElementById("channel-label").value = "";
+            document.getElementById("channel-freq").value = "";
+            document.getElementById("channel-modulation").value = "am";
+            document.getElementById("channel-enabled").checked = true;
+            
+            // Clear advanced settings
+            document.getElementById("channel-highpass").value = "";
+            document.getElementById("channel-lowpass").value = "";
+            document.getElementById("channel-bandwidth").value = "";
+            document.getElementById("channel-ampfactor").value = "";
+            document.getElementById("channel-afc").value = "";
+            document.getElementById("channel-notch").value = "";
+            document.getElementById("channel-notch-q").value = "";
+            document.getElementById("channel-squelch-threshold").value = "";
+            document.getElementById("channel-squelch-snr").value = "";
+            document.getElementById("channel-ctcss").value = "";
+            
+            // Enable file recording by default
+            document.getElementById("output-file-enabled").checked = true;
+            document.getElementById("output-file-directory").value = "recordings";
+            document.getElementById("output-file-filename").value = "";
+            document.getElementById("output-file-continuous").checked = false;
+            document.getElementById("output-file-split").checked = false;
+            toggleOutputSection("file");
+            
+            // Disable other outputs
+            document.getElementById("output-udp-enabled").checked = false;
+            document.getElementById("output-udp-address").value = "";
+            document.getElementById("output-udp-port").value = "";
+            document.getElementById("output-udp-continuous").checked = false;
+            document.getElementById("output-udp-headers").checked = false;
+            document.getElementById("output-udp-chunking").checked = true;
+            toggleOutputSection("udp");
+            
+            document.getElementById("output-icecast-enabled").checked = false;
+            document.getElementById("output-icecast-server").value = "";
+            document.getElementById("output-icecast-port").value = "";
+            document.getElementById("output-icecast-mountpoint").value = "";
+            document.getElementById("output-icecast-username").value = "";
+            document.getElementById("output-icecast-password").value = "";
+            document.getElementById("output-icecast-name").value = "";
+            toggleOutputSection("icecast");
+            
+            // Switch to General tab
+            showChannelTab("general");
+        }
+        
         function showAddChannelModal() {
             currentEditingChannel = null;
             document.getElementById("modal-title").textContent = "Add Channel";
@@ -1036,13 +1144,22 @@
             document.getElementById("channel-notch-q").value = "10.0";
             document.getElementById("output-file-directory").value = "recordings";
             
-            // Hide all output sections
-            document.getElementById("output-file-section").style.display = "none";
+            // Enable file recording by default
+            document.getElementById("output-file-enabled").checked = true;
+            document.getElementById("output-file-section").style.display = "block";
+            
+            // Hide other output sections
             document.getElementById("output-udp-section").style.display = "none";
             document.getElementById("output-icecast-section").style.display = "none";
-            document.getElementById("output-file-enabled").checked = false;
             document.getElementById("output-udp-enabled").checked = false;
             document.getElementById("output-icecast-enabled").checked = false;
+            
+            // Set UDP defaults
+            document.getElementById("output-udp-headers").checked = false;
+            document.getElementById("output-udp-chunking").checked = true;
+            
+            // Show General tab
+            showChannelTab("general");
             
             document.getElementById("channel-modal").style.display = "block";
         }
@@ -1090,6 +1207,8 @@
                                 document.getElementById("output-udp-address").value = out.dest_address || "";
                                 document.getElementById("output-udp-port").value = out.dest_port || "";
                                 document.getElementById("output-udp-continuous").checked = out.continuous || false;
+                                document.getElementById("output-udp-headers").checked = out.udp_headers || false;
+                                document.getElementById("output-udp-chunking").checked = out.udp_chunking !== false; // Default true
                                 toggleOutputSection("udp");
                             } else if (out.type === "icecast") {
                                 document.getElementById("output-icecast-enabled").checked = out.enabled;
@@ -1105,6 +1224,9 @@
                     }
                 }
             }
+            
+            // Show General tab
+            showChannelTab("general");
             
             document.getElementById("channel-modal").style.display = "block";
         }
@@ -1207,7 +1329,9 @@
                     enabled: true,
                     dest_address: formData.get("output_udp_address"),
                     dest_port: parseInt(formData.get("output_udp_port")),
-                    continuous: formData.get("output_udp_continuous") === "on"
+                    continuous: formData.get("output_udp_continuous") === "on",
+                    udp_headers: formData.get("output_udp_headers") === "on",
+                    udp_chunking: formData.get("output_udp_chunking") !== "off" // Default true if not explicitly off
                 });
             }
             
@@ -1280,6 +1404,43 @@
                     }
                 })
                 .catch(function(err) { console.error("Delete channel error:", err); });
+        }
+        
+        function loadOutputSettings() {
+            fetch("/api/outputs/settings")
+                .then(function(r) { return r.json(); })
+                .then(function(data) {
+                    if (data.file_chunk_duration_minutes) {
+                        document.getElementById("file-chunk-duration").value = data.file_chunk_duration_minutes;
+                        document.getElementById("chunk-duration-value").textContent = data.file_chunk_duration_minutes;
+                    }
+                })
+                .catch(function(err) { console.error("Load output settings error:", err); });
+        }
+        
+        function saveOutputSettings() {
+            var chunkDuration = parseInt(document.getElementById("file-chunk-duration").value);
+            
+            fetch("/api/outputs/settings", {
+                method: "PUT",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({
+                    file_chunk_duration_minutes: chunkDuration
+                })
+            })
+            .then(function(r) { return r.json(); })
+            .then(function(data) {
+                if (data.status === "success") {
+                    markChange("outputs");
+                    alert("Output settings saved. Click 'Apply Changes' to apply the configuration.");
+                } else {
+                    alert("Error: " + (data.error || "Failed to save output settings"));
+                }
+            })
+            .catch(function(err) {
+                console.error("Save output settings error:", err);
+                alert("Error saving output settings. Please check the console for details.");
+            });
         }
         
         // Close modal when clicking outside

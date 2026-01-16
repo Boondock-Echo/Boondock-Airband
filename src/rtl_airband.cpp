@@ -274,7 +274,7 @@ bool init_output(channel_t* channel, output_t* output) {
         shout_setup((icecast_data*)(output->data), channel->mode);
     } else if (output->type == O_UDP_STREAM) {
         udp_stream_data* sdata = (udp_stream_data*)(output->data);
-        if (!udp_stream_init(sdata, channel->mode, (size_t)WAVE_BATCH * sizeof(float))) {
+        if (!udp_stream_init(sdata, channel->mode, (size_t)WAVE_BATCH * sizeof(float), sdata->channel_id)) {
             return false;
         }
 #ifdef WITH_PULSEAUDIO

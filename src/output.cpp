@@ -26,6 +26,9 @@
 #include <sys/types.h>
 #include <unistd.h>
 #include <vorbis/vorbisenc.h>
+#include <vector>
+#include <sstream>
+#include <iomanip>
 
 // SHOUTERR_RETRY is available since libshout 2.4.0.
 // Set it to an impossible value if it's not there.
@@ -311,11 +314,160 @@ static int open_file(file_data* fdata, mix_modes mixmode, int is_audio) {
     return 0;
 }
 
+// Forward declarations
+static void flush_metadata_buffer(file_data* fdata);
+static void close_metadata_file(file_data* fdata);
+
+// Flush metadata buffer to file
+static void flush_metadata_buffer(file_data* fdata) {
+    if (!fdata || !fdata->metadata_f || fdata->metadata_buffer.empty()) {
+        return;
+    }
+    
+    // Verify file is still valid
+    if (ferror(fdata->metadata_f)) {
+        log(LOG_WARNING, "Metadata file error, closing\n");
+        close_metadata_file(fdata);
+        return;
+    }
+    
+    for (const auto& entry : fdata->metadata_buffer) {
+        struct tm* timeinfo;
+        if (use_localtime) {
+            timeinfo = localtime(&entry.timestamp);
+        } else {
+            timeinfo = gmtime(&entry.timestamp);
+        }
+        
+        char time_str[64];
+        strftime(time_str, sizeof(time_str), "%Y-%m-%d %H:%M:%S", timeinfo);
+        
+        fprintf(fdata->metadata_f, "%s,%d,%s,%d,%.1f,%.1f\n",
+                time_str,
+                entry.channel_id,
+                entry.channel_name.c_str(),
+                entry.frequency_hz,
+                entry.signal_dbfs,
+                entry.snr_db);
+    }
+    
+    fflush(fdata->metadata_f);
+    fdata->metadata_buffer.clear();
+    gettimeofday(&fdata->last_metadata_flush, NULL);
+}
+
+// Log metadata entry (one per second)
+static void log_metadata(file_data* fdata, channel_t* channel) {
+    if (!fdata || !channel || fdata->device_index < 0) {
+        return;  // Skip for mixers or invalid data
+    }
+    
+    timeval current_time;
+    gettimeofday(&current_time, NULL);
+    time_t current_sec = current_time.tv_sec;
+    
+    // Only log once per second
+    if (current_sec == fdata->last_metadata_log_sec) {
+        return;
+    }
+    fdata->last_metadata_log_sec = current_sec;
+    
+    // Get channel information
+    if (!channel->freqlist || channel->freq_count == 0 || channel->freq_idx < 0 || channel->freq_idx >= channel->freq_count) {
+        return;
+    }
+    
+    freq_t* fparms = channel->freqlist + channel->freq_idx;
+    
+    // Create metadata entry
+    metadata_entry entry;
+    entry.timestamp = current_sec;
+    entry.channel_id = fdata->channel_index;
+    entry.channel_name = fparms->label ? fparms->label : "";
+    entry.frequency_hz = fparms->frequency;
+    entry.signal_dbfs = level_to_dBFS(fparms->squelch.signal_level());
+    
+    float noise_dbfs = level_to_dBFS(fparms->squelch.noise_level());
+    entry.snr_db = entry.signal_dbfs - noise_dbfs;
+    
+    // Add to buffer
+    fdata->metadata_buffer.push_back(entry);
+    
+    // Flush buffer every 30 seconds
+    if (fdata->last_metadata_flush.tv_sec == 0) {
+        gettimeofday(&fdata->last_metadata_flush, NULL);
+    } else {
+        double flush_delta = delta_sec(&fdata->last_metadata_flush, &current_time);
+        if (flush_delta >= 30.0) {
+            flush_metadata_buffer(fdata);
+        }
+    }
+}
+
+// Open metadata file
+static int open_metadata_file(file_data* fdata) {
+    if (!fdata || fdata->file_path.empty()) {
+        return -1;
+    }
+    
+    // Create metadata file path: same as audio file (final path, not .tmp) but with .txt extension
+    // Use file_path (final) not file_path_tmp
+    size_t last_dot = fdata->file_path.find_last_of('.');
+    if (last_dot == std::string::npos) {
+        fdata->metadata_file_path = fdata->file_path + ".txt";
+    } else {
+        fdata->metadata_file_path = fdata->file_path.substr(0, last_dot) + ".txt";
+    }
+    
+    // Open metadata file for append (creates if doesn't exist)
+    fdata->metadata_f = fopen(fdata->metadata_file_path.c_str(), "a");
+    if (!fdata->metadata_f) {
+        log(LOG_WARNING, "Cannot open metadata file %s (%s)\n", fdata->metadata_file_path.c_str(), strerror(errno));
+        return -1;
+    }
+    
+    // Write header if file is new (empty)
+    fseek(fdata->metadata_f, 0, SEEK_END);
+    long file_size = ftell(fdata->metadata_f);
+    if (file_size == 0) {
+        fprintf(fdata->metadata_f, "Timestamp,Channel_ID,Channel_Name,Frequency_Hz,Signal_dBFS,SNR_dB\n");
+        fflush(fdata->metadata_f);
+    }
+    
+    return 0;
+}
+
+// Close metadata file
+static void close_metadata_file(file_data* fdata) {
+    if (!fdata) {
+        return;
+    }
+    
+    // Flush any remaining metadata
+    if (!fdata->metadata_buffer.empty() && fdata->metadata_f) {
+        flush_metadata_buffer(fdata);
+    }
+    
+    if (fdata->metadata_f) {
+        fclose(fdata->metadata_f);
+        fdata->metadata_f = NULL;
+    }
+    
+    fdata->metadata_file_path.clear();
+    fdata->metadata_buffer.clear();
+    fdata->last_metadata_log_sec = 0;
+    fdata->last_metadata_flush.tv_sec = 0;
+    fdata->last_metadata_flush.tv_usec = 0;
+}
+
 static void close_file(output_t* output) {
     file_data* fdata = (file_data*)(output->data);
     if (!fdata) {
         return;
     }
+
+    // Close metadata file
+    close_metadata_file(fdata);
 
     // close all mp3 files for every output that has a lame context
     if (fdata->type == O_FILE && fdata->f && output->lame) {
@@ -354,7 +506,8 @@ static void close_if_necessary(output_t* output) {
     file_data* fdata = (file_data*)(output->data);
 
     static const double MIN_TRANSMISSION_TIME_SEC = 1.0;
-    static const double MAX_TRANSMISSION_TIME_SEC = 60.0 * 60.0;
+    extern int file_chunk_duration_minutes;
+    const double MAX_TRANSMISSION_TIME_SEC = file_chunk_duration_minutes * 60.0;
     static const double MAX_TRANSMISSION_IDLE_SEC = 0.5;
 
     if (!fdata || !fdata->f) {
@@ -370,6 +523,10 @@ static void close_if_necessary(output_t* output) {
 
         if (duration_sec > MAX_TRANSMISSION_TIME_SEC || (duration_sec > MIN_TRANSMISSION_TIME_SEC && idle_sec > MAX_TRANSMISSION_IDLE_SEC)) {
             debug_print("closing file %s, duration %f sec, idle %f sec\n", fdata->file_path.c_str(), duration_sec, idle_sec);
+            // Flush metadata before closing
+            if (fdata->metadata_f && !fdata->metadata_buffer.empty()) {
+                flush_metadata_buffer(fdata);
+            }
             close_file(output);
         }
         return;
@@ -389,6 +546,10 @@ static void close_if_necessary(output_t* output) {
 
     if (start_hour != current_hour) {
         debug_print("closing file %s after crossing hour boundary\n", fdata->file_path.c_str());
+        // Flush metadata before closing
+        if (fdata->metadata_f && !fdata->metadata_buffer.empty()) {
+            flush_metadata_buffer(fdata);
+        }
         close_file(output);
     }
 }
@@ -457,6 +618,14 @@ static bool output_file_ready(channel_t* channel, output_t* output) {
     if (open_file(fdata, channel->mode, is_audio) < 0) {
         log(LOG_WARNING, "Cannot open output file %s (%s)\n", fdata->file_path_tmp.c_str(), strerror(errno));
         return false;
+    }
+
+    // Open metadata file (only for file outputs, not rawfile)
+    if (output->type == O_FILE) {
+        if (open_metadata_file(fdata) < 0) {
+            // Non-fatal: continue even if metadata file can't be opened
+            log(LOG_WARNING, "Warning: Could not open metadata file, metadata logging disabled\n");
+        }
     }
 
     return true;
@@ -559,6 +728,11 @@ void process_outputs(channel_t* channel, int cur_scan_freq) {
             }
             channel->outputs[k].active = (channel->axcindicate != NO_SIGNAL);
             gettimeofday(&fdata->last_write_time, NULL);
+            
+            // Log metadata (once per second, flushed every 30 seconds)
+            if (channel->outputs[k].type == O_FILE) {
+                log_metadata(fdata, channel);
+            }
         } else if (channel->outputs[k].type == O_MIXER) {
             mixer_data* mdata = (mixer_data*)(channel->outputs[k].data);
             mixer_put_samples(mdata->mixer, mdata->input, channel->waveout, channel->axcindicate != NO_SIGNAL, WAVE_BATCH);
@@ -570,9 +744,9 @@ void process_outputs(channel_t* channel, int cur_scan_freq) {
             }
 
             if (channel->mode == MM_MONO) {
-                udp_stream_write(sdata, channel->waveout, (size_t)WAVE_BATCH * sizeof(float));
+                udp_stream_write(sdata, channel, channel->waveout, (size_t)WAVE_BATCH * sizeof(float));
             } else {
-                udp_stream_write(sdata, channel->waveout, channel->waveout_r, (size_t)WAVE_BATCH * sizeof(float));
+                udp_stream_write(sdata, channel, channel->waveout, channel->waveout_r, (size_t)WAVE_BATCH * sizeof(float));
             }
 
 #ifdef WITH_PULSEAUDIO
@@ -600,6 +774,11 @@ void disable_channel_outputs(channel_t* channel) {
             shout_free(icecast->shout);
             icecast->shout = NULL;
         } else if (output->type == O_FILE || output->type == O_RAWFILE) {
+            file_data* fdata = (file_data*)(output->data);
+            // Flush metadata before closing
+            if (fdata && fdata->metadata_f && !fdata->metadata_buffer.empty()) {
+                flush_metadata_buffer(fdata);
+            }
             close_file(&channel->outputs[k]);
         } else if (output->type == O_MIXER) {
             mixer_data* mdata = (mixer_data*)(output->data);
@@ -962,7 +1141,14 @@ void* output_thread(void* param) {
 
 // reconnect as required
 void* output_check_thread(void*) {
+    extern volatile int do_reload;
     while (!do_exit) {
+        // Check for reload request
+        if (do_reload) {
+            log(LOG_INFO, "Configuration reload requested, exiting to allow restart\n");
+            do_exit = 1;  // Trigger graceful shutdown
+            break;
+        }
         SLEEP(10000);
         for (int i = 0; i < device_count; i++) {
             device_t* dev = devices + i;

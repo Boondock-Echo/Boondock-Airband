@@ -36,6 +36,7 @@
 #include <sys/socket.h>
 #include <sys/stat.h>
 #include <unistd.h>
+#include <signal.h>
 #include <sstream>
 #include <string>
 #include <vector>
@@ -485,8 +486,8 @@ static string get_channels_full_json() {
                 
                 int enabled_count = 0;
                 for (int c = 0; c < chans.getLength(); c++) {
-                    bool disabled = chans[c].exists("disable") && (bool)chans[c]["disable"];
-                    if (disabled) continue;
+                    bool channel_disabled = chans[c].exists("disable") && (bool)chans[c]["disable"];
+                    if (channel_disabled) continue;
                     
                     if (enabled_count > 0) json << ",";
                     enabled_count++;
@@ -578,6 +579,12 @@ static string get_channels_full_json() {
                             }
                             if (outputs[o].exists("dest_port")) {
                                 json << ",\"dest_port\":" << (int)outputs[o]["dest_port"];
+                            }
+                            if (outputs[o].exists("udp_headers")) {
+                                json << ",\"udp_headers\":" << ((bool)outputs[o]["udp_headers"] ? "true" : "false");
+                            }
+                            if (outputs[o].exists("udp_chunking")) {
+                                json << ",\"udp_chunking\":" << ((bool)outputs[o]["udp_chunking"] ? "true" : "false");
                             }
                             json << "}";
                         }
@@ -714,22 +721,26 @@ static void handle_api_request(int client_fd, const char* path, const char* meth
         send_json_response(client_fd, "{\"status\":\"restart_requested\"}");
     } else if (strcmp(path, "/api/apply") == 0 && strcmp(method, "POST") == 0) {
         // Apply configuration changes and reload
-        if (content_length > 0 && content_length < 2048) {
-            string body = read_request_body(client_fd, content_length);
-            
-            // For now, just trigger reload - actual config modification would be implemented here
-            // In a full implementation, this would:
-            // 1. Parse pending changes from JSON
-            // 2. Modify config file accordingly
-            // 3. Trigger reload
-            
-            if (web_server_trigger_reload() == 0) {
-                send_json_response(client_fd, "{\"status\":\"success\",\"message\":\"Configuration reload triggered. Changes will be applied.\"}");
+        // Read request body if present (increase limit to handle larger JSON)
+        if (content_length > 0) {
+            if (content_length < 10240) {  // Increased to 10KB
+                string body = read_request_body(client_fd, content_length);
+                // Body is read but not parsed - changes are already saved to config file
             } else {
-                send_error(client_fd, 500, "Failed to trigger configuration reload");
+                send_error(client_fd, 400, "Request body too large");
+                return;
             }
+        }
+        
+        // Send SIGHUP to current process to trigger configuration reload
+        // This is the standard way to trigger reload in daemon processes
+        pid_t pid = getpid();
+        if (kill(pid, SIGHUP) == 0) {
+            log(LOG_INFO, "SIGHUP sent for configuration reload\n");
+            send_json_response(client_fd, "{\"status\":\"success\",\"message\":\"Configuration reload triggered. Changes will be applied.\"}");
         } else {
-            send_error(client_fd, 400, "Invalid request");
+            log(LOG_ERR, "Failed to send SIGHUP for reload: %s\n", strerror(errno));
+            send_error(client_fd, 500, "Failed to trigger configuration reload");
         }
     } else if (strncmp(path, "/api/channels", 13) == 0) {
         // Channel management endpoints
@@ -750,8 +761,40 @@ static void handle_api_request(int client_fd, const char* path, const char* meth
                     // Update channel
                     send_json_response(client_fd, "{\"status\":\"success\",\"message\":\"Channel updated. Restart required.\"}");
                 } else if (strcmp(method, "DELETE") == 0) {
-                    // Delete channel
-                    send_json_response(client_fd, "{\"status\":\"success\",\"message\":\"Channel deleted. Restart required.\"}");
+                    // Delete channel - set disable = true in config
+                    const char* config_path = web_server_get_config_path();
+                    try {
+                        Config config;
+                        config.readFile(config_path);
+                        Setting& root = config.getRoot();
+                        
+                        if (root.exists("devices") && device_idx >= 0 && device_idx < root["devices"].getLength()) {
+                            Setting& dev = root["devices"][device_idx];
+                            if (dev.exists("channels") && channel_idx >= 0 && channel_idx < dev["channels"].getLength()) {
+                                Setting& channel = dev["channels"][channel_idx];
+                                // Set disable = true to mark channel as deleted
+                                if (channel.exists("disable")) {
+                                    channel["disable"] = true;
+                                } else {
+                                    channel.add("disable", Setting::TypeBoolean) = true;
+                                }
+                                
+                                // Write config back to file
+                                config.writeFile(config_path);
+                                send_json_response(client_fd, "{\"status\":\"success\",\"message\":\"Channel deleted. Restart required.\"}");
+                            } else {
+                                send_json_response(client_fd, "{\"status\":\"error\",\"message\":\"Invalid channel index\"}");
+                            }
+                        } else {
+                            send_json_response(client_fd, "{\"status\":\"error\",\"message\":\"Invalid device index\"}");
+                        }
+                    } catch (const FileIOException& fioex) {
+                        send_json_response(client_fd, "{\"status\":\"error\",\"message\":\"I/O error while reading config file\"}");
+                    } catch (const ParseException& pex) {
+                        send_json_response(client_fd, "{\"status\":\"error\",\"message\":\"Parse error in config file\"}");
+                    } catch (...) {
+                        send_json_response(client_fd, "{\"status\":\"error\",\"message\":\"Unknown error modifying config\"}");
+                    }
                 } else {
                     send_error(client_fd, 405, "Method not allowed");
                 }
@@ -773,6 +816,85 @@ static void handle_api_request(int client_fd, const char* path, const char* meth
                     send_error(client_fd, 404, "Invalid channel endpoint");
                 }
             }
+        }
+    } else if (strncmp(path, "/api/outputs", 12) == 0) {
+        // Output settings endpoints
+        if (strcmp(path, "/api/outputs/settings") == 0) {
+            if (strcmp(method, "GET") == 0) {
+                // Get output settings
+                const char* config_path = web_server_get_config_path();
+                try {
+                    Config config;
+                    config.readFile(config_path);
+                    Setting& root = config.getRoot();
+                    
+                    int chunk_duration = 60;  // Default
+                    if (root.exists("file_chunk_duration_minutes")) {
+                        chunk_duration = (int)root["file_chunk_duration_minutes"];
+                    }
+                    
+                    stringstream json;
+                    json << "{\"file_chunk_duration_minutes\":" << chunk_duration << "}";
+                    send_json_response(client_fd, json.str().c_str());
+                } catch (const std::exception& e) {
+                    send_json_response(client_fd, "{\"file_chunk_duration_minutes\":60}");
+                }
+            } else if (strcmp(method, "PUT") == 0) {
+                // Update output settings
+                const char* config_path = web_server_get_config_path();
+                char* body = (char*)XCALLOC(content_length + 1, sizeof(char));
+                ssize_t bytes_read = read(client_fd, body, content_length);
+                
+                if (bytes_read > 0) {
+                    body[bytes_read] = '\0';
+                    try {
+                        Config config;
+                        config.readFile(config_path);
+                        Setting& root = config.getRoot();
+                        
+                        // Parse JSON (simple parsing for this specific case)
+                        int chunk_duration = 60;
+                        const char* chunk_key = "\"file_chunk_duration_minutes\"";
+                        char* chunk_pos = strstr(body, chunk_key);
+                        if (chunk_pos) {
+                            char* colon = strchr(chunk_pos, ':');
+                            if (colon) {
+                                chunk_duration = atoi(colon + 1);
+                                // Validate range: 5-60 minutes, in 5-minute increments
+                                if (chunk_duration < 5 || chunk_duration > 60 || (chunk_duration % 5 != 0)) {
+                                    send_json_response(client_fd, "{\"status\":\"error\",\"message\":\"file_chunk_duration_minutes must be between 5 and 60, in 5-minute increments\"}");
+                                    free(body);
+                                    return;
+                                }
+                            }
+                        }
+                        
+                        // Set or update the setting
+                        if (root.exists("file_chunk_duration_minutes")) {
+                            root["file_chunk_duration_minutes"] = chunk_duration;
+                        } else {
+                            root.add("file_chunk_duration_minutes", Setting::TypeInt) = chunk_duration;
+                        }
+                        
+                        // Write config back to file
+                        config.writeFile(config_path);
+                        send_json_response(client_fd, "{\"status\":\"success\",\"message\":\"Output settings updated. Restart required.\"}");
+                    } catch (const FileIOException& fioex) {
+                        send_json_response(client_fd, "{\"status\":\"error\",\"message\":\"I/O error while reading/writing config file\"}");
+                    } catch (const ParseException& pex) {
+                        send_json_response(client_fd, "{\"status\":\"error\",\"message\":\"Parse error in config file\"}");
+                    } catch (...) {
+                        send_json_response(client_fd, "{\"status\":\"error\",\"message\":\"Unknown error modifying config\"}");
+                    }
+                } else {
+                    send_json_response(client_fd, "{\"status\":\"error\",\"message\":\"Failed to read request body\"}");
+                }
+                free(body);
+            } else {
+                send_error(client_fd, 405, "Method not allowed");
+            }
+        } else {
+            send_error(client_fd, 404, "Invalid output endpoint");
         }
     } else {
         send_error(client_fd, 404, "API endpoint not found");
