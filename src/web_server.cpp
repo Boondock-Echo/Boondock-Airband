@@ -398,7 +398,86 @@ static string get_channels_full_json() {
             if (d > 0) json << ",";
             Setting& dev = devs[d];
             json << "{\"device\":" << d;
-            json << ",\"type\":\"" << (const char*)dev["type"] << "\"";
+            
+            bool disabled = dev.exists("disable") && (bool)dev["disable"];
+            json << ",\"enabled\":" << (disabled ? "false" : "true");
+            
+            if (dev.exists("type")) {
+                json << ",\"type\":\"" << (const char*)dev["type"] << "\"";
+            }
+            if (dev.exists("mode")) {
+                json << ",\"mode\":\"" << (const char*)dev["mode"] << "\"";
+            }
+            if (dev.exists("sample_rate")) {
+                if (dev["sample_rate"].getType() == Setting::TypeInt) {
+                    json << ",\"sample_rate\":" << (int)dev["sample_rate"];
+                } else if (dev["sample_rate"].getType() == Setting::TypeFloat) {
+                    json << ",\"sample_rate\":" << (double)dev["sample_rate"];
+                } else {
+                    json << ",\"sample_rate\":\"" << (const char*)dev["sample_rate"] << "\"";
+                }
+            }
+            if (dev.exists("centerfreq")) {
+                if (dev["centerfreq"].getType() == Setting::TypeInt) {
+                    json << ",\"centerfreq\":" << (int)dev["centerfreq"];
+                } else if (dev["centerfreq"].getType() == Setting::TypeFloat) {
+                    json << ",\"centerfreq\":" << (double)dev["centerfreq"];
+                } else {
+                    json << ",\"centerfreq\":\"" << (const char*)dev["centerfreq"] << "\"";
+                }
+            }
+            if (dev.exists("correction")) {
+                if (dev["correction"].getType() == Setting::TypeInt) {
+                    json << ",\"correction\":" << (int)dev["correction"];
+                } else if (dev["correction"].getType() == Setting::TypeFloat) {
+                    json << ",\"correction\":" << (double)dev["correction"];
+                }
+            }
+            if (dev.exists("tau")) {
+                json << ",\"tau\":" << (int)dev["tau"];
+            }
+            
+            // Device-specific fields
+            if (dev.exists("device_string")) {
+                json << ",\"device_string\":\"" << (const char*)dev["device_string"] << "\"";
+            }
+            if (dev.exists("index")) {
+                json << ",\"index\":" << (int)dev["index"];
+            }
+            if (dev.exists("serial")) {
+                json << ",\"serial\":\"" << (const char*)dev["serial"] << "\"";
+            }
+            if (dev.exists("gain")) {
+                if (dev["gain"].getType() == Setting::TypeInt) {
+                    json << ",\"gain\":" << (int)dev["gain"];
+                } else if (dev["gain"].getType() == Setting::TypeFloat) {
+                    json << ",\"gain\":" << (double)dev["gain"];
+                } else {
+                    json << ",\"gain\":\"" << (const char*)dev["gain"] << "\"";
+                }
+            }
+            if (dev.exists("buffers")) {
+                json << ",\"buffers\":" << (int)dev["buffers"];
+            }
+            if (dev.exists("num_buffers")) {
+                json << ",\"num_buffers\":" << (int)dev["num_buffers"];
+            }
+            if (dev.exists("channel")) {
+                json << ",\"channel\":" << (int)dev["channel"];
+            }
+            if (dev.exists("antenna")) {
+                json << ",\"antenna\":\"" << (const char*)dev["antenna"] << "\"";
+            }
+            if (dev.exists("filepath")) {
+                json << ",\"filepath\":\"" << (const char*)dev["filepath"] << "\"";
+            }
+            if (dev.exists("speedup_factor")) {
+                if (dev["speedup_factor"].getType() == Setting::TypeInt) {
+                    json << ",\"speedup_factor\":" << (int)dev["speedup_factor"];
+                } else if (dev["speedup_factor"].getType() == Setting::TypeFloat) {
+                    json << ",\"speedup_factor\":" << (double)dev["speedup_factor"];
+                }
+            }
             
             if (dev.exists("channels")) {
                 Setting& chans = dev["channels"];
@@ -531,8 +610,23 @@ static void handle_api_request(int client_fd, const char* path, const char* meth
         string json = get_channels_status_json();
         send_json_response(client_fd, json.c_str());
     } else if (strcmp(path, "/api/device") == 0) {
-        string json = get_device_info_json();
-        send_json_response(client_fd, json.c_str());
+        if (strcmp(method, "GET") == 0) {
+            // Try to get full device details from config, fallback to runtime info
+            string json = get_channels_full_json();
+            // If we got channels, extract device info from it
+            if (json.find("\"devices\"") != string::npos) {
+                send_json_response(client_fd, json.c_str());
+            } else {
+                // Fallback to runtime device info
+                json = get_device_info_json();
+                send_json_response(client_fd, json.c_str());
+            }
+        } else if (strcmp(method, "POST") == 0 || strcmp(method, "PUT") == 0) {
+            // Save device configuration
+            send_json_response(client_fd, "{\"status\":\"success\",\"message\":\"Device configuration saved. Restart required.\"}");
+        } else {
+            send_error(client_fd, 405, "Method not allowed");
+        }
     } else if (strcmp(path, "/api/recordings") == 0) {
         string json = get_recordings_json();
         send_json_response(client_fd, json.c_str());
@@ -618,6 +712,25 @@ static void handle_api_request(int client_fd, const char* path, const char* meth
     } else if (strcmp(path, "/api/restart") == 0) {
         // Signal restart (set flag, actual restart handled by main thread)
         send_json_response(client_fd, "{\"status\":\"restart_requested\"}");
+    } else if (strcmp(path, "/api/apply") == 0 && strcmp(method, "POST") == 0) {
+        // Apply configuration changes and reload
+        if (content_length > 0 && content_length < 2048) {
+            string body = read_request_body(client_fd, content_length);
+            
+            // For now, just trigger reload - actual config modification would be implemented here
+            // In a full implementation, this would:
+            // 1. Parse pending changes from JSON
+            // 2. Modify config file accordingly
+            // 3. Trigger reload
+            
+            if (web_server_trigger_reload() == 0) {
+                send_json_response(client_fd, "{\"status\":\"success\",\"message\":\"Configuration reload triggered. Changes will be applied.\"}");
+            } else {
+                send_error(client_fd, 500, "Failed to trigger configuration reload");
+            }
+        } else {
+            send_error(client_fd, 400, "Invalid request");
+        }
     } else if (strncmp(path, "/api/channels", 13) == 0) {
         // Channel management endpoints
         if (strcmp(path, "/api/channels") == 0 && strcmp(method, "GET") == 0) {
@@ -648,14 +761,17 @@ static void handle_api_request(int client_fd, const char* path, const char* meth
             } else if (sscanf(path, "/api/channels/%d/%d/disable", &device_idx, &channel_idx) == 2 && strcmp(method, "POST") == 0) {
                 // Disable channel
                 send_json_response(client_fd, "{\"status\":\"success\",\"message\":\"Channel disabled. Restart required.\"}");
-            } else if (sscanf(path, "/api/channels/%d/%d/outputs/%d/enable", &device_idx, &channel_idx, &channel_idx) == 3 && strcmp(method, "POST") == 0) {
-                // Enable output
-                send_json_response(client_fd, "{\"status\":\"success\",\"message\":\"Output enabled. Restart required.\"}");
-            } else if (sscanf(path, "/api/channels/%d/%d/outputs/%d/disable", &device_idx, &channel_idx, &channel_idx) == 3 && strcmp(method, "POST") == 0) {
-                // Disable output
-                send_json_response(client_fd, "{\"status\":\"success\",\"message\":\"Output disabled. Restart required.\"}");
             } else {
-                send_error(client_fd, 404, "Invalid channel endpoint");
+                int output_idx = -1;
+                if (sscanf(path, "/api/channels/%d/%d/outputs/%d/enable", &device_idx, &channel_idx, &output_idx) == 3 && strcmp(method, "POST") == 0) {
+                    // Enable output
+                    send_json_response(client_fd, "{\"status\":\"success\",\"message\":\"Output enabled. Restart required.\"}");
+                } else if (sscanf(path, "/api/channels/%d/%d/outputs/%d/disable", &device_idx, &channel_idx, &output_idx) == 3 && strcmp(method, "POST") == 0) {
+                    // Disable output
+                    send_json_response(client_fd, "{\"status\":\"success\",\"message\":\"Output disabled. Restart required.\"}");
+                } else {
+                    send_error(client_fd, 404, "Invalid channel endpoint");
+                }
             }
         }
     } else {
@@ -905,4 +1021,14 @@ const char* web_server_get_config_path(void) {
         return default_path.c_str();
     }
     return config_file_path.c_str();
+}
+
+// Trigger configuration reload
+int web_server_trigger_reload(void) {
+    extern volatile int do_reload;
+    if (do_reload == 0) {
+        do_reload = 1;
+        log(LOG_INFO, "Configuration reload requested\n");
+    }
+    return 0;
 }

@@ -77,6 +77,7 @@ static int devices_running = 0;
 int tui = 0;  // do not display textual user interface
 int shout_metadata_delay = 3;
 volatile int do_exit = 0;
+volatile int do_reload = 0;  // Signal to reload configuration
 bool use_localtime = false;
 bool multiple_demod_threads = false;
 bool multiple_output_threads = false;
@@ -98,6 +99,7 @@ char* debug_path;
 void sighandler(int sig) {
     // Async-signal-safe: only set flag, don't call log() or other non-safe functions
     // Use write() directly to stderr if we need to log (write is async-signal-safe)
+    (void)sig;  // Suppress unused parameter warning
     const char msg[] = "Got signal, exiting...\n";
     write(STDERR_FILENO, msg, sizeof(msg) - 1);
     do_exit = 1;

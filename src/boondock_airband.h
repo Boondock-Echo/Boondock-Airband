@@ -352,7 +352,7 @@ extern char* stats_filepath;
 extern size_t fft_size, fft_size_log;
 extern int device_count, mixer_count;
 extern int shout_metadata_delay;
-extern volatile int do_exit, device_opened;
+extern volatile int do_exit, device_opened, do_reload;
 extern float alpha;
 extern device_t* devices;
 extern mixer_t* mixers;

@@ -46,4 +46,7 @@ void web_server_set_config_path(const char* config_path);
 // Get the configuration file path
 const char* web_server_get_config_path(void);
 
+// Trigger configuration reload (returns 0 on success, -1 on error)
+int web_server_trigger_reload(void);
+
 #endif /* _WEB_SERVER_H */
