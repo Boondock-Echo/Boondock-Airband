@@ -61,6 +61,7 @@
 #include "boondock_airband.h"
 #include "squelch.h"
 #include "web_server.h"
+#include "helper_functions.h"
 
 #ifdef WITH_PROFILING
 #include "gperftools/profiler.h"
@@ -95,7 +96,10 @@ char* debug_path;
 #endif /* DEBUG */
 
 void sighandler(int sig) {
-    log(LOG_NOTICE, "Got signal %d, exiting\n", sig);
+    // Async-signal-safe: only set flag, don't call log() or other non-safe functions
+    // Use write() directly to stderr if we need to log (write is async-signal-safe)
+    const char msg[] = "Got signal, exiting...\n";
+    write(STDERR_FILENO, msg, sizeof(msg) - 1);
     do_exit = 1;
 }
 
@@ -729,6 +733,66 @@ static int count_devices_running() {
     return ret;
 }
 
+// Create default config file with SoapySDR Airspy and NOAA channels
+static bool create_default_config(const char* config_path) {
+    FILE* f = fopen(config_path, "w");
+    if (!f) {
+        cerr << "Failed to create default config file " << config_path << ": " << strerror(errno) << "\n";
+        return false;
+    }
+    
+    fprintf(f, "# Default Boondock Airband configuration\n");
+    fprintf(f, "# Generated automatically - modify as needed\n\n");
+    fprintf(f, "fft_size = 1024;\n");
+    fprintf(f, "localtime = true;\n\n");
+    fprintf(f, "devices:\n");
+    fprintf(f, "(\n");
+    fprintf(f, "  {\n");
+    fprintf(f, "    type = \"soapysdr\";\n");
+    fprintf(f, "    device_string = \"driver=airspy\";\n");
+    fprintf(f, "    gain = \"LNA=12,MIX=10,VGA=10\";\n");
+    fprintf(f, "    centerfreq = 162.47500;\n");
+    fprintf(f, "    correction = 0;\n");
+    fprintf(f, "    sample_rate = 2.5;\n");
+    fprintf(f, "    channels:\n");
+    fprintf(f, "    (\n");
+    
+    // NOAA channels: 162.400, 162.425, 162.450, 162.475, 162.500, 162.525, 162.550
+    const double noaa_freqs[] = {162.40000, 162.42500, 162.45000, 162.47500, 162.50000, 162.52500, 162.55000};
+    const char* noaa_labels[] = {"NOAA 162.400", "NOAA 162.425", "NOAA 162.450", "NOAA 162.475", 
+                                  "NOAA 162.500", "NOAA 162.525", "NOAA 162.550"};
+    int num_channels = sizeof(noaa_freqs) / sizeof(noaa_freqs[0]);
+    
+    for (int i = 0; i < num_channels; i++) {
+        fprintf(f, "      {\n");
+        fprintf(f, "        freq = %.5f;\n", noaa_freqs[i]);
+        fprintf(f, "        label = \"%s\";\n", noaa_labels[i]);
+        fprintf(f, "        modulation = \"nfm\";\n");
+        fprintf(f, "        lowpass = -1;\n");
+        fprintf(f, "        highpass = -1;\n");
+        fprintf(f, "        bandwidth = 5000;\n");
+        fprintf(f, "        ampfactor = 2.00;\n");
+        fprintf(f, "        squelch_snr_threshold = 0.00;\n");
+        fprintf(f, "        outputs:\n");
+        fprintf(f, "        (\n");
+        fprintf(f, "          {\n");
+        fprintf(f, "            type = \"file\";\n");
+        fprintf(f, "            directory = \"recordings\";\n");
+        fprintf(f, "            filename_template = \"%s\";\n", noaa_labels[i]);
+        fprintf(f, "            continuous = true;\n");
+        fprintf(f, "          }\n");
+        fprintf(f, "        );\n");
+        fprintf(f, "      }%s\n", (i < num_channels - 1) ? "," : "");
+    }
+    
+    fprintf(f, "    );\n");
+    fprintf(f, "  }\n");
+    fprintf(f, ");\n");
+    
+    fclose(f);
+    return true;
+}
+
 int main(int argc, char* argv[]) {
 #ifdef WITH_PROFILING
     ProfilerStart("boondock_airband.prof");
@@ -737,10 +801,12 @@ int main(int argc, char* argv[]) {
 #pragma GCC diagnostic ignored "-Wwrite-strings"
     char* cfgfile = CFGFILE;
     char* pidfile = PIDFILE;
+    char* local_cfgfile = NULL;  // For dynamically allocated config file path
 #pragma GCC diagnostic warning "-Wwrite-strings"
 
     int opt;
     char optstring[16] = "efFhvc:p:";
+    bool config_file_specified = false;
 
 #ifdef NFM
     strcat(optstring, "Q");
@@ -781,6 +847,7 @@ int main(int argc, char* argv[]) {
                 break;
             case 'c':
                 cfgfile = optarg;
+                config_file_specified = true;
                 break;
             case 'p':
                 web_port = atoi(optarg);
@@ -814,6 +881,61 @@ int main(int argc, char* argv[]) {
         exit(1);
     }
 #endif /* WITH_BCM_VC */
+
+    // If no config file was specified, check for boondock_airband.conf in current directory
+    // If it doesn't exist, create a default one
+    if (!config_file_specified) {
+        char cwd[1024];
+        if (getcwd(cwd, sizeof(cwd)) == NULL) {
+            cerr << "Failed to get current working directory: " << strerror(errno) << "\n";
+            exit(EXIT_FAILURE);
+        }
+        
+        string local_config = string(cwd) + "/boondock_airband.conf";
+        
+        // Check if local config exists
+        if (!file_exists(local_config)) {
+            // Create default config in current directory
+            cerr << "No configuration file found. Creating default config: " << local_config << "\n";
+            if (!create_default_config(local_config.c_str())) {
+                cerr << "Failed to create default configuration file. Exiting.\n";
+                exit(EXIT_FAILURE);
+            }
+            
+            // Create recordings directory
+            string recordings_dir = string(cwd) + "/recordings";
+            if (!make_dir(recordings_dir)) {
+                cerr << "Warning: Failed to create recordings directory: " << recordings_dir << "\n";
+                cerr << "You may need to create it manually.\n";
+            } else {
+                cerr << "Created recordings directory: " << recordings_dir << "\n";
+            }
+            
+            cerr << "Default configuration created with:\n";
+            cerr << "  - SoapySDR with Airspy driver\n";
+            cerr << "  - Gain: LNA=12, MIX=10, VGA=10\n";
+            cerr << "  - Sample Rate: 2.5 MHz\n";
+            cerr << "  - Mode: Multichannel\n";
+            cerr << "  - All NOAA channels with continuous recording\n";
+            cerr << "  - Output directory: recordings/\n\n";
+        }
+        
+        // Use local config (either existing or newly created)
+        local_cfgfile = (char*)malloc(local_config.length() + 1);
+        if (local_cfgfile) {
+            strcpy(local_cfgfile, local_config.c_str());
+            cfgfile = local_cfgfile;
+        }
+    } else {
+        // Config file was specified, but ensure recordings directory exists if it's in current dir
+        char cwd[1024];
+        if (getcwd(cwd, sizeof(cwd)) != NULL) {
+            string recordings_dir = string(cwd) + "/recordings";
+            if (!dir_exists(recordings_dir)) {
+                make_dir(recordings_dir);  // Try to create, but don't fail if it doesn't work
+            }
+        }
+    }
 
     // read config
     try {
@@ -1210,6 +1332,12 @@ int main(int argc, char* argv[]) {
     }
 
     close_debug();
+    
+    // Free dynamically allocated config file path if used
+    if (local_cfgfile) {
+        free(local_cfgfile);
+    }
+    
 #ifdef WITH_PROFILING
     ProfilerStop();
 #endif /* WITH_PROFILING */

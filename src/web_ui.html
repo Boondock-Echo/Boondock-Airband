@@ -162,7 +162,7 @@
             <div class="card">
                 <h2>Channels</h2>
                 <div style="margin-bottom: 20px;">
-                    <button class="btn btn-success" onclick="addChannel()">+ Add Channel</button>
+                    <button class="btn btn-success" onclick="showAddChannelModal()">+ Add Channel</button>
                 </div>
                 <table>
                     <thead>
@@ -170,14 +170,197 @@
                             <th>ENABLE</th>
                             <th>NAME</th>
                             <th>FREQUENCY</th>
-                            <th>UDP PORT</th>
+                            <th>MODULATION</th>
                             <th>SQUELCH</th>
+                            <th>RECORDING</th>
                             <th>STREAMING</th>
+                            <th>CONTINUOUS</th>
                             <th>ACTIONS</th>
                         </tr>
                     </thead>
                     <tbody id="channels-list-tbody"></tbody>
                 </table>
+            </div>
+        </div>
+        
+        <!-- Channel Add/Edit Modal -->
+        <div id="channel-modal" class="modal" style="display: none; position: fixed; z-index: 1000; left: 0; top: 0; width: 100%; height: 100%; overflow: auto; background-color: rgba(0,0,0,0.4);">
+            <div class="modal-content" style="background-color: #fefefe; margin: 5% auto; padding: 20px; border: 1px solid #888; width: 90%; max-width: 800px; border-radius: 8px; max-height: 90vh; overflow-y: auto;">
+                <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px;">
+                    <h2 id="modal-title">Add Channel</h2>
+                    <span class="close" onclick="closeChannelModal()" style="color: #aaa; float: right; font-size: 28px; font-weight: bold; cursor: pointer;">&times;</span>
+                </div>
+                <form id="channel-form" onsubmit="saveChannel(event)">
+                    <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 15px;">
+                        <!-- Basic Settings -->
+                        <div class="form-group">
+                            <label>Channel Name/Label *</label>
+                            <input type="text" id="channel-label" name="label" required placeholder="e.g., NOAA 162.400">
+                        </div>
+                        <div class="form-group">
+                            <label>Frequency (MHz) *</label>
+                            <input type="number" id="channel-freq" name="freq" step="0.001" required placeholder="162.400">
+                        </div>
+                        <div class="form-group">
+                            <label>Modulation *</label>
+                            <select id="channel-modulation" name="modulation" required>
+                                <option value="am">AM</option>
+                                <option value="nfm">NFM</option>
+                            </select>
+                        </div>
+                        <div class="form-group">
+                            <label><input type="checkbox" id="channel-enabled" name="enabled" checked> Channel Enabled</label>
+                        </div>
+                        
+                        <!-- Audio Processing -->
+                        <div class="form-group">
+                            <label>Highpass Filter (Hz)</label>
+                            <input type="number" id="channel-highpass" name="highpass" value="100" placeholder="100">
+                            <small>Default: 100 Hz</small>
+                        </div>
+                        <div class="form-group">
+                            <label>Lowpass Filter (Hz)</label>
+                            <input type="number" id="channel-lowpass" name="lowpass" value="2500" placeholder="2500">
+                            <small>Default: 2500 Hz</small>
+                        </div>
+                        <div class="form-group">
+                            <label>Bandwidth (Hz)</label>
+                            <input type="number" id="channel-bandwidth" name="bandwidth" value="5000" placeholder="5000">
+                            <small>For NFM, typically 5000 Hz</small>
+                        </div>
+                        <div class="form-group">
+                            <label>Amplification Factor</label>
+                            <input type="number" id="channel-ampfactor" name="ampfactor" step="0.1" value="1.0" placeholder="1.0">
+                            <small>Default: 1.0</small>
+                        </div>
+                        
+                        <!-- Squelch Settings -->
+                        <div class="form-group">
+                            <label>Squelch Threshold (dBFS)</label>
+                            <input type="number" id="channel-squelch-threshold" name="squelch_threshold" step="0.1" placeholder="0 (auto)">
+                            <small>0 = auto, negative values only</small>
+                        </div>
+                        <div class="form-group">
+                            <label>Squelch SNR Threshold (dB)</label>
+                            <input type="number" id="channel-squelch-snr" name="squelch_snr_threshold" step="0.1" placeholder="0 (disabled)">
+                            <small>0 = disabled, -1 = use default</small>
+                        </div>
+                        
+                        <!-- Advanced Settings -->
+                        <div class="form-group">
+                            <label>AFC (Auto Frequency Control)</label>
+                            <input type="number" id="channel-afc" name="afc" min="0" max="255" value="0" placeholder="0">
+                            <small>0 = disabled, 1-255 = sensitivity</small>
+                        </div>
+                        <div class="form-group">
+                            <label>Notch Filter Frequency (Hz)</label>
+                            <input type="number" id="channel-notch" name="notch" step="0.1" placeholder="0 (disabled)">
+                            <small>Remove specific frequency (e.g., 60 Hz hum)</small>
+                        </div>
+                        <div class="form-group">
+                            <label>Notch Filter Q Factor</label>
+                            <input type="number" id="channel-notch-q" name="notch_q" step="0.1" value="10.0" placeholder="10.0">
+                            <small>Default: 10.0</small>
+                        </div>
+                        <div class="form-group">
+                            <label>CTCSS Tone (Hz)</label>
+                            <input type="number" id="channel-ctcss" name="ctcss" step="0.1" placeholder="0 (disabled)">
+                            <small>Sub-audible tone frequency</small>
+                        </div>
+                    </div>
+                    
+                    <!-- Outputs Section -->
+                    <div style="margin-top: 30px; border-top: 2px solid #e0e0e0; padding-top: 20px;">
+                        <h3>Outputs</h3>
+                        
+                        <!-- File Output (Recording) -->
+                        <div style="background: #f8f8f8; padding: 15px; border-radius: 4px; margin-bottom: 15px;">
+                            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px;">
+                                <label><input type="checkbox" id="output-file-enabled" name="output_file_enabled" onchange="toggleOutputSection('file')"> Enable File Recording</label>
+                            </div>
+                            <div id="output-file-section" style="display: none;">
+                                <div class="form-group">
+                                    <label>Directory *</label>
+                                    <input type="text" id="output-file-directory" name="output_file_directory" placeholder="recordings">
+                                </div>
+                                <div class="form-group">
+                                    <label>Filename Template *</label>
+                                    <input type="text" id="output-file-filename" name="output_file_filename" placeholder="Channel_Name">
+                                </div>
+                                <div class="form-group">
+                                    <label><input type="checkbox" id="output-file-continuous" name="output_file_continuous"> Continuous Recording</label>
+                                    <small>Record even when squelch is closed</small>
+                                </div>
+                                <div class="form-group">
+                                    <label><input type="checkbox" id="output-file-split" name="output_file_split"> Split on Transmission</label>
+                                    <small>Create new file when squelch opens</small>
+                                </div>
+                            </div>
+                        </div>
+                        
+                        <!-- UDP Stream Output -->
+                        <div style="background: #f8f8f8; padding: 15px; border-radius: 4px; margin-bottom: 15px;">
+                            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px;">
+                                <label><input type="checkbox" id="output-udp-enabled" name="output_udp_enabled" onchange="toggleOutputSection('udp')"> Enable UDP Streaming</label>
+                            </div>
+                            <div id="output-udp-section" style="display: none;">
+                                <div class="form-group">
+                                    <label>Destination Address *</label>
+                                    <input type="text" id="output-udp-address" name="output_udp_address" placeholder="127.0.0.1">
+                                </div>
+                                <div class="form-group">
+                                    <label>Destination Port *</label>
+                                    <input type="number" id="output-udp-port" name="output_udp_port" placeholder="6001">
+                                </div>
+                                <div class="form-group">
+                                    <label><input type="checkbox" id="output-udp-continuous" name="output_udp_continuous"> Continuous Streaming</label>
+                                    <small>Stream even when squelch is closed</small>
+                                </div>
+                            </div>
+                        </div>
+                        
+                        <!-- Icecast Output -->
+                        <div style="background: #f8f8f8; padding: 15px; border-radius: 4px; margin-bottom: 15px;">
+                            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px;">
+                                <label><input type="checkbox" id="output-icecast-enabled" name="output_icecast_enabled" onchange="toggleOutputSection('icecast')"> Enable Icecast Streaming</label>
+                            </div>
+                            <div id="output-icecast-section" style="display: none;">
+                                <div class="form-group">
+                                    <label>Server *</label>
+                                    <input type="text" id="output-icecast-server" name="output_icecast_server" placeholder="icecast.example.com">
+                                </div>
+                                <div class="form-group">
+                                    <label>Port *</label>
+                                    <input type="number" id="output-icecast-port" name="output_icecast_port" placeholder="8000">
+                                </div>
+                                <div class="form-group">
+                                    <label>Mountpoint *</label>
+                                    <input type="text" id="output-icecast-mountpoint" name="output_icecast_mountpoint" placeholder="/stream.mp3">
+                                </div>
+                                <div class="form-group">
+                                    <label>Username *</label>
+                                    <input type="text" id="output-icecast-username" name="output_icecast_username" placeholder="source">
+                                </div>
+                                <div class="form-group">
+                                    <label>Password *</label>
+                                    <input type="password" id="output-icecast-password" name="output_icecast_password" placeholder="password">
+                                </div>
+                                <div class="form-group">
+                                    <label>Stream Name</label>
+                                    <input type="text" id="output-icecast-name" name="output_icecast_name" placeholder="Channel Name">
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                    
+                    <div style="margin-top: 20px; display: flex; gap: 10px; justify-content: flex-end;">
+                        <button type="button" class="btn" onclick="closeChannelModal()" style="background: #6c757d; color: white;">Cancel</button>
+                        <button type="submit" class="btn btn-success">Save Channel</button>
+                    </div>
+                    <input type="hidden" id="channel-device-index" name="device_index" value="0">
+                    <input type="hidden" id="channel-index" name="channel_index" value="">
+                    <input type="hidden" id="channel-edit-mode" name="edit_mode" value="false">
+                </form>
             </div>
         </div>
         <div id="page-outputs" class="page hidden">

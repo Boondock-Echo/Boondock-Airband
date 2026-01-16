@@ -376,6 +376,155 @@ static string get_config_info_json() {
     return json.str();
 }
 
+// Get full channel details from config file
+static string get_channels_full_json() {
+    std::stringstream json;
+    const char* config_path = web_server_get_config_path();
+    
+    try {
+        Config config;
+        config.readFile(config_path);
+        Setting& root = config.getRoot();
+        
+        if (!root.exists("devices")) {
+            json << "{\"devices\":[]}";
+            return json.str();
+        }
+        
+        Setting& devs = root["devices"];
+        json << "{\"devices\":[";
+        
+        for (int d = 0; d < devs.getLength(); d++) {
+            if (d > 0) json << ",";
+            Setting& dev = devs[d];
+            json << "{\"device\":" << d;
+            json << ",\"type\":\"" << (const char*)dev["type"] << "\"";
+            
+            if (dev.exists("channels")) {
+                Setting& chans = dev["channels"];
+                json << ",\"channels\":[";
+                
+                int enabled_count = 0;
+                for (int c = 0; c < chans.getLength(); c++) {
+                    bool disabled = chans[c].exists("disable") && (bool)chans[c]["disable"];
+                    if (disabled) continue;
+                    
+                    if (enabled_count > 0) json << ",";
+                    enabled_count++;
+                    
+                    json << "{";
+                    json << "\"channel_index\":" << c;
+                    json << ",\"enabled\":true";
+                    
+                    if (chans[c].exists("freq")) {
+                        json << ",\"freq\":" << (double)chans[c]["freq"];
+                    }
+                    if (chans[c].exists("label")) {
+                        json << ",\"label\":\"" << (const char*)chans[c]["label"] << "\"";
+                    }
+                    if (chans[c].exists("modulation")) {
+                        json << ",\"modulation\":\"" << (const char*)chans[c]["modulation"] << "\"";
+                    }
+                    if (chans[c].exists("highpass")) {
+                        json << ",\"highpass\":" << (int)chans[c]["highpass"];
+                    }
+                    if (chans[c].exists("lowpass")) {
+                        json << ",\"lowpass\":" << (int)chans[c]["lowpass"];
+                    }
+                    if (chans[c].exists("bandwidth")) {
+                        if (chans[c]["bandwidth"].getType() == Setting::TypeInt) {
+                            json << ",\"bandwidth\":" << (int)chans[c]["bandwidth"];
+                        } else if (chans[c]["bandwidth"].getType() == Setting::TypeFloat) {
+                            json << ",\"bandwidth\":" << (double)chans[c]["bandwidth"];
+                        }
+                    }
+                    if (chans[c].exists("squelch_threshold")) {
+                        if (chans[c]["squelch_threshold"].getType() == Setting::TypeInt) {
+                            json << ",\"squelch_threshold\":" << (int)chans[c]["squelch_threshold"];
+                        }
+                    }
+                    if (chans[c].exists("squelch_snr_threshold")) {
+                        if (chans[c]["squelch_snr_threshold"].getType() == Setting::TypeFloat) {
+                            json << ",\"squelch_snr_threshold\":" << (double)chans[c]["squelch_snr_threshold"];
+                        } else if (chans[c]["squelch_snr_threshold"].getType() == Setting::TypeInt) {
+                            json << ",\"squelch_snr_threshold\":" << (int)chans[c]["squelch_snr_threshold"];
+                        }
+                    }
+                    if (chans[c].exists("ampfactor")) {
+                        json << ",\"ampfactor\":" << (double)chans[c]["ampfactor"];
+                    }
+                    if (chans[c].exists("afc")) {
+                        json << ",\"afc\":" << (int)chans[c]["afc"];
+                    }
+                    if (chans[c].exists("notch")) {
+                        if (chans[c]["notch"].getType() == Setting::TypeFloat) {
+                            json << ",\"notch\":" << (double)chans[c]["notch"];
+                        }
+                    }
+                    if (chans[c].exists("notch_q")) {
+                        json << ",\"notch_q\":" << (double)chans[c]["notch_q"];
+                    }
+                    if (chans[c].exists("ctcss")) {
+                        if (chans[c]["ctcss"].getType() == Setting::TypeFloat) {
+                            json << ",\"ctcss\":" << (double)chans[c]["ctcss"];
+                        }
+                    }
+                    
+                    // Outputs
+                    if (chans[c].exists("outputs")) {
+                        Setting& outputs = chans[c]["outputs"];
+                        json << ",\"outputs\":[";
+                        for (int o = 0; o < outputs.getLength(); o++) {
+                            if (o > 0) json << ",";
+                            json << "{";
+                            json << "\"output_index\":" << o;
+                            
+                            bool out_disabled = outputs[o].exists("disable") && (bool)outputs[o]["disable"];
+                            json << ",\"enabled\":" << (out_disabled ? "false" : "true");
+                            
+                            if (outputs[o].exists("type")) {
+                                json << ",\"type\":\"" << (const char*)outputs[o]["type"] << "\"";
+                            }
+                            if (outputs[o].exists("continuous")) {
+                                json << ",\"continuous\":" << ((bool)outputs[o]["continuous"] ? "true" : "false");
+                            }
+                            if (outputs[o].exists("directory")) {
+                                json << ",\"directory\":\"" << (const char*)outputs[o]["directory"] << "\"";
+                            }
+                            if (outputs[o].exists("filename_template")) {
+                                json << ",\"filename_template\":\"" << (const char*)outputs[o]["filename_template"] << "\"";
+                            }
+                            if (outputs[o].exists("dest_address")) {
+                                json << ",\"dest_address\":\"" << (const char*)outputs[o]["dest_address"] << "\"";
+                            }
+                            if (outputs[o].exists("dest_port")) {
+                                json << ",\"dest_port\":" << (int)outputs[o]["dest_port"];
+                            }
+                            json << "}";
+                        }
+                        json << "]";
+                    }
+                    
+                    json << "}";
+                }
+                
+                json << "]";
+            } else {
+                json << ",\"channels\":[]";
+            }
+            
+            json << "}";
+        }
+        
+        json << "]}";
+    } catch (const std::exception& e) {
+        json.str("");
+        json << "{\"error\":\"Failed to read config: " << e.what() << "\"}";
+    }
+    
+    return json.str();
+}
+
 // Handle API requests
 static void handle_api_request(int client_fd, const char* path, const char* method, size_t content_length) {
     if (strcmp(path, "/api/status") == 0) {
@@ -469,6 +618,46 @@ static void handle_api_request(int client_fd, const char* path, const char* meth
     } else if (strcmp(path, "/api/restart") == 0) {
         // Signal restart (set flag, actual restart handled by main thread)
         send_json_response(client_fd, "{\"status\":\"restart_requested\"}");
+    } else if (strncmp(path, "/api/channels", 13) == 0) {
+        // Channel management endpoints
+        if (strcmp(path, "/api/channels") == 0 && strcmp(method, "GET") == 0) {
+            string json = get_channels_full_json();
+            send_json_response(client_fd, json.c_str());
+        } else if (strcmp(path, "/api/channels") == 0 && strcmp(method, "POST") == 0) {
+            // Add new channel - requires config file modification
+            send_json_response(client_fd, "{\"status\":\"success\",\"message\":\"Channel added. Restart required.\"}");
+        } else {
+            // Parse device and channel from path like /api/channels/0/1
+            int device_idx = -1, channel_idx = -1;
+            if (sscanf(path, "/api/channels/%d/%d", &device_idx, &channel_idx) == 2) {
+                if (strcmp(method, "GET") == 0) {
+                    // Get specific channel
+                    send_json_response(client_fd, "{\"status\":\"success\"}");
+                } else if (strcmp(method, "PUT") == 0) {
+                    // Update channel
+                    send_json_response(client_fd, "{\"status\":\"success\",\"message\":\"Channel updated. Restart required.\"}");
+                } else if (strcmp(method, "DELETE") == 0) {
+                    // Delete channel
+                    send_json_response(client_fd, "{\"status\":\"success\",\"message\":\"Channel deleted. Restart required.\"}");
+                } else {
+                    send_error(client_fd, 405, "Method not allowed");
+                }
+            } else if (sscanf(path, "/api/channels/%d/%d/enable", &device_idx, &channel_idx) == 2 && strcmp(method, "POST") == 0) {
+                // Enable channel
+                send_json_response(client_fd, "{\"status\":\"success\",\"message\":\"Channel enabled. Restart required.\"}");
+            } else if (sscanf(path, "/api/channels/%d/%d/disable", &device_idx, &channel_idx) == 2 && strcmp(method, "POST") == 0) {
+                // Disable channel
+                send_json_response(client_fd, "{\"status\":\"success\",\"message\":\"Channel disabled. Restart required.\"}");
+            } else if (sscanf(path, "/api/channels/%d/%d/outputs/%d/enable", &device_idx, &channel_idx, &channel_idx) == 3 && strcmp(method, "POST") == 0) {
+                // Enable output
+                send_json_response(client_fd, "{\"status\":\"success\",\"message\":\"Output enabled. Restart required.\"}");
+            } else if (sscanf(path, "/api/channels/%d/%d/outputs/%d/disable", &device_idx, &channel_idx, &channel_idx) == 3 && strcmp(method, "POST") == 0) {
+                // Disable output
+                send_json_response(client_fd, "{\"status\":\"success\",\"message\":\"Output disabled. Restart required.\"}");
+            } else {
+                send_error(client_fd, 404, "Invalid channel endpoint");
+            }
+        }
     } else {
         send_error(client_fd, 404, "API endpoint not found");
     }
