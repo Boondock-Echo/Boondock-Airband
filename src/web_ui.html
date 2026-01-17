@@ -64,6 +64,7 @@
             <a href="#" class="nav-link" data-page="channels">Channels</a>
             <a href="#" class="nav-link" data-page="outputs">Outputs</a>
             <a href="#" class="nav-link" data-page="config">Config</a>
+            <a href="#" class="nav-link" data-page="spectrum">Spectrum</a>
         </div>
     </div>
     <div class="container">
@@ -475,7 +476,7 @@
                                 </div>
                                 <div class="form-group">
                                     <label>Password *</label>
-                                    <input type="password" id="output-icecast-password" name="output_icecast_password" placeholder="password">
+                                    <input type="password" id="output-icecast-password" name="output_icecast_password" placeholder="password" autocomplete="current-password">
                                 </div>
                                 <div class="form-group">
                                     <label>Stream Name</label>
@@ -570,6 +571,96 @@
                     </div>
                     <button type="button" class="btn btn-success" onclick="saveOutputSettings()">Save Output Settings</button>
                 </form>
+            </div>
+        </div>
+        <div id="page-spectrum" class="page hidden">
+            <div class="card">
+                <!-- Main Display Sections: Spectrum and Waterfall -->
+                <div style="background: #000; border: 1px solid #333; border-radius: 4px; padding: 10px; margin-bottom: 20px;">
+                    <canvas id="spectrum-canvas" width="1200" height="200" style="width: 100%; height: 200px; display: block;"></canvas>
+                </div>
+                <div style="background: #000; border: 1px solid #333; border-radius: 4px; padding: 10px; position: relative;">
+                    <canvas id="waterfall-canvas" width="1200" height="300" style="width: 100%; height: 300px; display: block;"></canvas>
+                    <!-- Status labels overlay on waterfall -->
+                    <div id="waterfall-status-labels" style="position: absolute; bottom: 10px; right: 10px; color: #fff; font-family: monospace; font-size: 12px; background: rgba(0, 0, 0, 0.7); padding: 8px 12px; border-radius: 4px; pointer-events: none;">
+                        <div id="waterfall-center-freq">Center: --</div>
+                        <div id="waterfall-sample-rate">Sample Rate: --</div>
+                        <div id="waterfall-updated">Updated: --</div>
+                    </div>
+                </div>
+                
+                <!-- Bottom Controls Section -->
+                <div style="margin-top: 20px; display: flex; gap: 20px; align-items: flex-start;">
+                    <!-- Device Selection -->
+                    <div style="flex: 0 0 250px;">
+                        <label for="spectrum-device-select" style="display: block; margin-bottom: 5px; font-weight: 500;">Device:</label>
+                        <select id="spectrum-device-select" style="width: 100%; padding: 5px 10px; border: 1px solid #ddd; border-radius: 4px;">
+                            <option value="">Loading...</option>
+                        </select>
+                        <label style="display: block; margin-top: 10px; font-weight: 500;">
+                            <input type="checkbox" id="spectrum-auto-update" checked> Auto Update
+                        </label>
+                    </div>
+                    
+                    <!-- Display Controls (Collapsible) -->
+                    <div style="flex: 1;">
+                        <div style="background: #f8f8f8; padding: 15px; border-radius: 4px;">
+                            <h3 style="margin: 0 0 15px 0; font-size: 16px; cursor: pointer; user-select: none;" onclick="toggleDisplayControls()">
+                                Display Controls <span id="display-controls-arrow">▼</span>
+                            </h3>
+                            <div id="display-controls-content" style="display: none;">
+                                <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 15px;">
+                                    <div>
+                                        <label for="spectrum-gain" style="display: block; margin-bottom: 5px; font-size: 13px;">
+                                            Gain/Intensity: <span id="spectrum-gain-value">-40</span> dB
+                                        </label>
+                                        <input type="range" id="spectrum-gain" min="-40" max="40" value="-40" step="1" 
+                                               style="width: 100%;" oninput="updateSpectrumGain(this.value)">
+                                    </div>
+                                    <div>
+                                        <label for="spectrum-vertical-scale" style="display: block; margin-bottom: 5px; font-size: 13px;">
+                                            Vertical Scale: <span id="spectrum-vertical-scale-value">70</span> dB
+                                        </label>
+                                        <input type="range" id="spectrum-vertical-scale" min="40" max="200" value="70" step="10" 
+                                               style="width: 100%;" oninput="updateSpectrumVerticalScale(this.value)">
+                                    </div>
+                                    <div>
+                                        <label for="spectrum-vertical-offset" style="display: block; margin-bottom: 5px; font-size: 13px;">
+                                            Vertical Offset: <span id="spectrum-vertical-offset-value">35</span> dB
+                                        </label>
+                                        <input type="range" id="spectrum-vertical-offset" min="-60" max="60" value="35" step="5" 
+                                               style="width: 100%;" oninput="updateSpectrumVerticalOffset(this.value)">
+                                    </div>
+                                    <div>
+                                        <label for="spectrum-averaging" style="display: block; margin-bottom: 5px; font-size: 13px;">
+                                            Averaging: <span id="spectrum-averaging-value">10</span>
+                                        </label>
+                                        <input type="range" id="spectrum-averaging" min="1" max="64" value="10" step="1" 
+                                               style="width: 100%;" oninput="updateSpectrumAveraging(this.value)">
+                                    </div>
+                                    <div>
+                                        <label for="waterfall-intensity" style="display: block; margin-bottom: 5px; font-size: 13px;">
+                                            Waterfall Intensity: <span id="waterfall-intensity-value">80</span>%
+                                        </label>
+                                        <input type="range" id="waterfall-intensity" min="10" max="100" value="80" step="5" 
+                                               style="width: 100%;" oninput="updateWaterfallIntensity(this.value)">
+                                    </div>
+                                    <div>
+                                        <label for="waterfall-speed" style="display: block; margin-bottom: 5px; font-size: 13px;">
+                                            Waterfall Speed: <span id="waterfall-speed-value">1</span>x
+                                        </label>
+                                        <input type="range" id="waterfall-speed" min="1" max="10" value="1" step="1" 
+                                               style="width: 100%;" oninput="updateWaterfallSpeed(this.value)">
+                                    </div>
+                                </div>
+                                <div style="margin-top: 15px; display: flex; gap: 10px;">
+                                    <button class="btn btn-primary" onclick="resetSpectrumControls()" style="font-size: 12px; padding: 5px 15px;">Reset to Defaults</button>
+                                    <button class="btn btn-primary" onclick="clearWaterfall()" style="font-size: 12px; padding: 5px 15px;">Clear Waterfall</button>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
             </div>
         </div>
         <div id="page-config" class="page hidden">
@@ -1658,7 +1749,7 @@
         }
         
         function downloadRecording(filename) {
-            window.location.href = "/recordings/" + encodeURIComponent(filename);
+            window.location.href = "/recordings/" + encodeURIComponent(filename) + "?download=1";
         }
         
         function loadConfigInfo() {
@@ -1751,6 +1842,952 @@
         
         // Initialize apply button state
         updateApplyButton();
+        
+        // Spectrum Analyzer
+        var spectrumDevice = -1;
+        var spectrumUpdateInterval = null;
+        var spectrumCanvas = null;
+        var waterfallCanvas = null;
+        var spectrumCtx = null;
+        var waterfallCtx = null;
+        var waterfallData = [];  // Array of spectrum lines for waterfall
+        var maxWaterfallLines = 200;  // Maximum number of lines in waterfall
+        
+        // Control parameters
+        var spectrumGain = -40;  // dB gain adjustment
+        var spectrumVerticalScale = 70;  // dB range (e.g., 70 = -95 to -25)
+        var spectrumVerticalOffset = 35;  // dB vertical offset
+        var spectrumAveraging = 10;  // Number of samples to average
+        var spectrumAveragingBuffer = [];  // Buffer for averaging
+        var waterfallIntensity = 80;  // Intensity percentage (10-100)
+        var waterfallSpeed = 1;  // Speed multiplier (1-10)
+        var waterfallSpeedCounter = 0;  // Counter for speed control
+        var currentSpectrumData = null;  // Store current data for redraw
+        
+        // Zoom and pan parameters
+        var spectrumZoom = 1.0;  // Zoom level (1.0 = no zoom, >1.0 = zoomed in)
+        var spectrumPan = 0.0;  // Pan offset in frequency (Hz)
+        var isPanning = false;  // Whether user is currently panning
+        var panStartX = 0;  // Starting X position for pan
+        var panStartOffset = 0;  // Starting pan offset when drag begins
+        var mouseX = -1;  // Current mouse X position (-1 = not over canvas)
+        var mouseFreq = 0;  // Frequency at mouse position
+        
+        function initSpectrum() {
+            spectrumCanvas = document.getElementById("spectrum-canvas");
+            waterfallCanvas = document.getElementById("waterfall-canvas");
+            if (!spectrumCanvas || !waterfallCanvas) return;
+            
+            spectrumCtx = spectrumCanvas.getContext("2d");
+            waterfallCtx = waterfallCanvas.getContext("2d", { willReadFrequently: true });
+            
+            // Set canvas size based on container
+            var container = spectrumCanvas.parentElement;
+            var width = container.clientWidth - 20;
+            spectrumCanvas.width = width;
+            waterfallCanvas.width = width;
+            // Fixed heights: spectrum = 200px, waterfall = 300px
+            spectrumCanvas.height = 200;
+            spectrumCanvas.style.height = "200px";
+            waterfallCanvas.height = 300;
+            waterfallCanvas.style.height = "300px";
+            maxWaterfallLines = Math.floor(300 / 2);
+            
+            // Load device list
+            loadSpectrumDevices();
+            
+            // Setup device selector
+            document.getElementById("spectrum-device-select").addEventListener("change", function() {
+                var val = this.value;
+                spectrumDevice = val === "" ? -1 : parseInt(val);
+                if (spectrumDevice >= 0) {
+                    startSpectrumUpdate();
+                } else {
+                    stopSpectrumUpdate();
+                }
+            });
+            
+            // Setup auto-update checkbox
+            document.getElementById("spectrum-auto-update").addEventListener("change", function() {
+                if (this.checked && spectrumDevice >= 0) {
+                    startSpectrumUpdate();
+                } else {
+                    stopSpectrumUpdate();
+                }
+            });
+            
+            // Setup zoom and pan controls
+            setupSpectrumZoomPan();
+            
+            // Initialize control values
+            updateSpectrumGain(document.getElementById("spectrum-gain").value);
+            updateSpectrumVerticalScale(document.getElementById("spectrum-vertical-scale").value);
+            updateSpectrumVerticalOffset(document.getElementById("spectrum-vertical-offset").value);
+            updateSpectrumAveraging(document.getElementById("spectrum-averaging").value);
+            updateWaterfallIntensity(document.getElementById("waterfall-intensity").value);
+            updateWaterfallSpeed(document.getElementById("waterfall-speed").value);
+            
+            // Start if page is visible
+            if (document.getElementById("page-spectrum").classList.contains("hidden") === false) {
+                if (spectrumDevice >= 0) {
+                    startSpectrumUpdate();
+                }
+            }
+        }
+        
+        function loadSpectrumDevices() {
+            fetch("/api/spectrum")
+                .then(function(r) { return r.json(); })
+                .then(function(data) {
+                    var select = document.getElementById("spectrum-device-select");
+                    select.innerHTML = "<option value=\"\">Select Device...</option>";
+                    if (data.devices && data.devices.length > 0) {
+                        data.devices.forEach(function(dev) {
+                            var opt = document.createElement("option");
+                            opt.value = dev.device;
+                            opt.textContent = "Device " + dev.device + " (" + (dev.center_freq / 1000000).toFixed(3) + " MHz, " + (dev.sample_rate / 1000).toFixed(0) + " kHz)";
+                            select.appendChild(opt);
+                        });
+                        // Auto-select if only one device
+                        if (data.devices.length === 1) {
+                            select.value = data.devices[0].device;
+                            spectrumDevice = parseInt(data.devices[0].device);
+                            if (document.getElementById("spectrum-auto-update").checked) {
+                                startSpectrumUpdate();
+                            }
+                        }
+                    }
+                })
+                .catch(function(err) {
+                    console.error("Error loading spectrum devices:", err);
+                });
+        }
+        
+        function toggleDisplayControls() {
+            var content = document.getElementById("display-controls-content");
+            var arrow = document.getElementById("display-controls-arrow");
+            if (content.style.display === "none") {
+                content.style.display = "block";
+                arrow.textContent = "▲";
+            } else {
+                content.style.display = "none";
+                arrow.textContent = "▼";
+            }
+        }
+        
+        function startSpectrumUpdate() {
+            if (spectrumUpdateInterval) return;
+            updateSpectrum();
+            spectrumUpdateInterval = setInterval(updateSpectrum, 100);  // Update every 100ms
+        }
+        
+        function stopSpectrumUpdate() {
+            if (spectrumUpdateInterval) {
+                clearInterval(spectrumUpdateInterval);
+                spectrumUpdateInterval = null;
+            }
+        }
+        
+        function updateSpectrum() {
+            if (spectrumDevice < 0 || !spectrumCanvas || !waterfallCanvas) return;
+            
+            fetch("/api/spectrum/" + spectrumDevice)
+                .then(function(r) { return r.json(); })
+                .then(function(data) {
+                    if (data.data && data.data.length > 0) {
+                        drawSpectrum(data);
+                        // Update waterfall with zoom/pan applied
+                        updateWaterfall(data.data);
+                        // Update waterfall status labels
+                        document.getElementById("waterfall-center-freq").textContent = 
+                            "Center: " + (data.center_freq / 1000000).toFixed(3) + " MHz";
+                        document.getElementById("waterfall-sample-rate").textContent = 
+                            "Sample Rate: " + (data.sample_rate / 1000).toFixed(0) + " kHz";
+                        document.getElementById("waterfall-updated").textContent = 
+                            "Updated: " + new Date(data.last_update * 1000).toLocaleTimeString();
+                    }
+                })
+                .catch(function(err) {
+                    console.error("Error updating spectrum:", err);
+                    document.getElementById("waterfall-updated").textContent = "Error: " + (err.message || "Unknown error");
+                });
+        }
+        
+        function drawSpectrum(data) {
+            if (!data || !data.data || data.data.length === 0) return;
+            
+            // Store current data for redraw on control changes
+            currentSpectrumData = data;
+            
+            var ctx = spectrumCtx;
+            var width = spectrumCanvas.width;
+            var height = spectrumCanvas.height;
+            var dataPoints = data.data;
+            var centerFreq = data.center_freq;
+            var sampleRate = data.sample_rate;
+            
+            // Apply averaging
+            if (spectrumAveraging > 1) {
+                spectrumAveragingBuffer.push(dataPoints.slice());
+                if (spectrumAveragingBuffer.length > spectrumAveraging) {
+                    spectrumAveragingBuffer.shift();
+                }
+                
+                // Average the buffer
+                if (spectrumAveragingBuffer.length > 0) {
+                    var averaged = new Array(dataPoints.length);
+                    for (var i = 0; i < dataPoints.length; i++) {
+                        var sum = 0;
+                        for (var j = 0; j < spectrumAveragingBuffer.length; j++) {
+                            sum += spectrumAveragingBuffer[j][i];
+                        }
+                        averaged[i] = sum / spectrumAveragingBuffer.length;
+                    }
+                    dataPoints = averaged;
+                }
+            } else {
+                spectrumAveragingBuffer = [];
+            }
+            
+            // Calculate dB range based on vertical scale
+            // Offset shifts the center of the range, not the minimum
+            var centerDb = -60 + spectrumVerticalOffset;  // Center around -60 dB (typical noise floor)
+            var dbMin = centerDb - (spectrumVerticalScale / 2);
+            var dbMax = centerDb + (spectrumVerticalScale / 2);
+            
+            // Ensure we don't go below -150 dB (hardware limit) or above 0 dB (saturation)
+            if (dbMin < -150) {
+                var diff = -150 - dbMin;
+                dbMin = -150;
+                dbMax += diff;
+            }
+            if (dbMax > 0) {
+                var diff = dbMax - 0;
+                dbMax = 0;
+                dbMin -= diff;
+            }
+            
+            // Clear canvas
+            ctx.fillStyle = "#000";
+            ctx.fillRect(0, 0, width, height);
+            
+            // Draw grid
+            ctx.strokeStyle = "#333";
+            ctx.lineWidth = 1;
+            for (var i = 0; i <= 10; i++) {
+                var y = (height / 10) * i;
+                ctx.beginPath();
+                ctx.moveTo(0, y);
+                ctx.lineTo(width, y);
+                ctx.stroke();
+            }
+            
+            // Calculate visible frequency range with zoom and pan
+            var fullFreqRange = sampleRate / 2;
+            var fullStartFreq = centerFreq - fullFreqRange;
+            var fullEndFreq = centerFreq + fullFreqRange;
+            var fullBandwidth = fullEndFreq - fullStartFreq;
+            
+            // Apply zoom: visible bandwidth = full bandwidth / zoom
+            visibleBandwidth = fullBandwidth / spectrumZoom;
+            visibleStartFreq = fullStartFreq + (fullBandwidth - visibleBandwidth) / 2 - spectrumPan;
+            var visibleEndFreq = visibleStartFreq + visibleBandwidth;
+            
+            // Clamp to full bandwidth limits
+            if (visibleStartFreq < fullStartFreq) {
+                visibleStartFreq = fullStartFreq;
+                visibleEndFreq = visibleStartFreq + visibleBandwidth;
+                spectrumPan = (fullBandwidth - visibleBandwidth) / 2;
+            }
+            if (visibleEndFreq > fullEndFreq) {
+                visibleEndFreq = fullEndFreq;
+                visibleStartFreq = visibleEndFreq - visibleBandwidth;
+                spectrumPan = -(fullBandwidth - visibleBandwidth) / 2;
+            }
+            
+            // Draw frequency labels
+            ctx.fillStyle = "#888";
+            ctx.font = "12px monospace";
+            ctx.textAlign = "left";
+            ctx.textBaseline = "bottom";
+            for (var i = 0; i <= 10; i++) {
+                var freq = visibleStartFreq + (visibleBandwidth * i / 10);
+                var x = (width / 10) * i;
+                ctx.fillText((freq / 1000000).toFixed(3) + " MHz", x + 5, height - 2);
+            }
+            
+            // Draw dB scale
+            ctx.fillStyle = "#888";
+            ctx.textAlign = "right";
+            for (var i = 0; i <= 10; i++) {
+                var db = dbMin + ((dbMax - dbMin) * i / 10);
+                var y = (height / 10) * i;
+                ctx.fillText(db.toFixed(0) + " dB", width - 5, y + 4);
+            }
+            
+            // Draw mouse cursor line and frequency label
+            if (mouseX >= 0 && mouseX < width) {
+                // Draw vertical line at mouse position
+                ctx.strokeStyle = "#ff0";
+                ctx.lineWidth = 1;
+                ctx.setLineDash([5, 5]);
+                ctx.beginPath();
+                ctx.moveTo(mouseX, 0);
+                ctx.lineTo(mouseX, height);
+                ctx.stroke();
+                ctx.setLineDash([]);
+                
+                // Draw frequency label at bottom
+                ctx.fillStyle = "#ff0";
+                ctx.font = "bold 12px monospace";
+                ctx.textAlign = "center";
+                ctx.textBaseline = "top";
+                var labelText = (mouseFreq / 1000000).toFixed(4) + " MHz";
+                var labelWidth = ctx.measureText(labelText).width;
+                var labelX = mouseX;
+                var labelY = height - 18;
+                
+                // Ensure label stays within canvas bounds
+                if (labelX - labelWidth/2 < 0) labelX = labelWidth/2;
+                if (labelX + labelWidth/2 > width) labelX = width - labelWidth/2;
+                
+                // Draw background for label
+                ctx.fillStyle = "rgba(0, 0, 0, 0.7)";
+                ctx.fillRect(labelX - labelWidth/2 - 4, labelY - 2, labelWidth + 8, 16);
+                
+                // Draw text
+                ctx.fillStyle = "#ff0";
+                ctx.fillText(labelText, labelX, labelY);
+            }
+            
+            // Draw spectrum line
+            if (dataPoints.length > 0) {
+                ctx.strokeStyle = "#0f0";
+                ctx.lineWidth = 2;
+                ctx.beginPath();
+                
+                // Map pixel X to frequency, then to data point index
+                var fullFreqRange = sampleRate / 2;
+                var fullStartFreq = centerFreq - fullFreqRange;
+                var fullBandwidth = fullFreqRange * 2;
+                var visibleBandwidth = fullBandwidth / spectrumZoom;
+                var visibleStartFreq = fullStartFreq + (fullBandwidth - visibleBandwidth) / 2 - spectrumPan;
+                
+                // Clamp visible range
+                if (visibleStartFreq < fullStartFreq) {
+                    visibleStartFreq = fullStartFreq;
+                }
+                var visibleEndFreq = visibleStartFreq + visibleBandwidth;
+                if (visibleEndFreq > fullStartFreq + fullBandwidth) {
+                    visibleEndFreq = fullStartFreq + fullBandwidth;
+                    visibleStartFreq = visibleEndFreq - visibleBandwidth;
+                }
+                
+                var freqPerBin = fullBandwidth / dataPoints.length;
+                var hasStarted = false;
+                
+                for (var x = 0; x < width; x++) {
+                    // Convert pixel X to frequency
+                    var freq = visibleStartFreq + (visibleBandwidth * x / width);
+                    // Convert frequency to data point index
+                    var idx = Math.floor((freq - fullStartFreq) / freqPerBin);
+                    if (idx < 0) idx = 0;
+                    if (idx >= dataPoints.length) idx = dataPoints.length - 1;
+                    
+                    var db = dataPoints[idx] + spectrumGain;  // Apply gain
+                    
+                    // Calculate Y position (allow values outside range to extend beyond canvas)
+                    var y = height - ((db - dbMin) / (dbMax - dbMin)) * height;
+                    
+                    // Only draw if within reasonable bounds (allow slight overflow for visibility)
+                    if (y >= -10 && y <= height + 10) {
+                        if (!hasStarted) {
+                            ctx.moveTo(x, Math.max(0, Math.min(height, y)));
+                            hasStarted = true;
+                        } else {
+                            ctx.lineTo(x, Math.max(0, Math.min(height, y)));
+                        }
+                    } else if (hasStarted && (y < -10 || y > height + 10)) {
+                        // If we go off-screen, close the path and start a new one
+                        ctx.stroke();
+                        ctx.beginPath();
+                        hasStarted = false;
+                    }
+                }
+                
+                if (hasStarted) {
+                    ctx.stroke();
+                }
+                
+                // Fill area under curve (only if we have a valid path)
+                if (hasStarted) {
+                    ctx.beginPath();
+                    var fullFreqRange = sampleRate / 2;
+                    var fullStartFreq = centerFreq - fullFreqRange;
+                    var fullBandwidth = fullFreqRange * 2;
+                    var visibleBandwidth = fullBandwidth / spectrumZoom;
+                    var visibleStartFreq = fullStartFreq + (fullBandwidth - visibleBandwidth) / 2 - spectrumPan;
+                    
+                    if (visibleStartFreq < fullStartFreq) {
+                        visibleStartFreq = fullStartFreq;
+                    }
+                    var visibleEndFreq = visibleStartFreq + visibleBandwidth;
+                    if (visibleEndFreq > fullStartFreq + fullBandwidth) {
+                        visibleEndFreq = fullStartFreq + fullBandwidth;
+                        visibleStartFreq = visibleEndFreq - visibleBandwidth;
+                    }
+                    
+                    var freqPerBin = fullBandwidth / dataPoints.length;
+                    
+                    for (var x = 0; x < width; x++) {
+                        var freq = visibleStartFreq + (visibleBandwidth * x / width);
+                        var idx = Math.floor((freq - fullStartFreq) / freqPerBin);
+                        if (idx < 0) idx = 0;
+                        if (idx >= dataPoints.length) idx = dataPoints.length - 1;
+                        
+                        var db = dataPoints[idx] + spectrumGain;
+                        var y = height - ((db - dbMin) / (dbMax - dbMin)) * height;
+                        y = Math.max(0, Math.min(height, y));
+                        
+                        if (x === 0) {
+                            ctx.moveTo(x, height);
+                            ctx.lineTo(x, y);
+                            firstY = y;
+                        } else {
+                            ctx.lineTo(x, y);
+                            lastY = y;
+                        }
+                    }
+                    ctx.lineTo(width, height);
+                    ctx.closePath();
+                    var gradient = ctx.createLinearGradient(0, 0, 0, height);
+                    gradient.addColorStop(0, "rgba(0, 255, 0, 0.3)");
+                    gradient.addColorStop(1, "rgba(0, 255, 0, 0.0)");
+                    ctx.fillStyle = gradient;
+                    ctx.fill();
+                }
+            }
+        }
+        
+        function updateWaterfall(spectrumData) {
+            if (!waterfallCtx || !spectrumData || spectrumData.length === 0) return;
+            
+            // Apply speed control
+            waterfallSpeedCounter++;
+            if (waterfallSpeedCounter < waterfallSpeed) {
+                return;  // Skip this update
+            }
+            waterfallSpeedCounter = 0;
+            
+            var width = waterfallCanvas.width;
+            var height = waterfallCanvas.height;
+            
+            // Apply gain to waterfall data
+            var adjustedData = spectrumData.map(function(db) {
+                return db + spectrumGain;
+            });
+            
+            // Add new line to waterfall data (at the beginning for top-to-bottom)
+            waterfallData.unshift(adjustedData.slice());
+            if (waterfallData.length > maxWaterfallLines) {
+                waterfallData.pop();  // Remove oldest (bottom)
+            }
+            
+            // Shift existing image down
+            var imageData = waterfallCtx.getImageData(0, 0, width, height);
+            waterfallCtx.putImageData(imageData, 0, 1);
+            
+            // Draw new line at top
+            var y = 0;
+            
+            // Use same zoom/pan calculation as spectrum
+            if (!currentSpectrumData) return;
+            var sampleRate = currentSpectrumData.sample_rate;
+            var centerFreq = currentSpectrumData.center_freq;
+            var fullFreqRange = sampleRate / 2;
+            var fullStartFreq = centerFreq - fullFreqRange;
+            var fullBandwidth = fullFreqRange * 2;
+            var visibleBandwidth = fullBandwidth / spectrumZoom;
+            var visibleStartFreq = fullStartFreq + (fullBandwidth - visibleBandwidth) / 2 - spectrumPan;
+            
+            // Clamp to full bandwidth limits
+            if (visibleStartFreq < fullStartFreq) {
+                visibleStartFreq = fullStartFreq;
+            }
+            var visibleEndFreq = visibleStartFreq + visibleBandwidth;
+            if (visibleEndFreq > fullStartFreq + fullBandwidth) {
+                visibleEndFreq = fullStartFreq + fullBandwidth;
+                visibleStartFreq = visibleEndFreq - visibleBandwidth;
+            }
+            
+            var freqPerBin = fullBandwidth / adjustedData.length;
+            
+            // Use same calculation as spectrum
+            var centerDb = -60 + spectrumVerticalOffset;
+            var dbMin = centerDb - (spectrumVerticalScale / 2);
+            var dbMax = centerDb + (spectrumVerticalScale / 2);
+            
+            if (dbMin < -150) {
+                var diff = -150 - dbMin;
+                dbMin = -150;
+                dbMax += diff;
+            }
+            if (dbMax > 0) {
+                var diff = dbMax - 0;
+                dbMax = 0;
+                dbMin -= diff;
+            }
+            
+            for (var x = 0; x < width; x++) {
+                // Convert pixel X to frequency (same as spectrum)
+                var freq = visibleStartFreq + (visibleBandwidth * x / width);
+                // Convert frequency to data point index
+                var idx = Math.floor((freq - fullStartFreq) / freqPerBin);
+                if (idx < 0) idx = 0;
+                if (idx >= adjustedData.length) idx = adjustedData.length - 1;
+                
+                var db = adjustedData[idx];
+                if (db < dbMin) db = dbMin;
+                if (db > dbMax) db = dbMax;
+                
+                // Convert dB to color using SDR-style palette
+                // Palette: Black -> Dark Blue -> Blue -> Cyan -> Green -> Yellow -> Orange -> Red
+                var normalized = Math.max(0, Math.min(1, (db - dbMin) / (dbMax - dbMin)));
+                var r, g, b;
+                
+                if (normalized < 0.15) {
+                    // Black to dark blue (0-15%)
+                    var t = normalized / 0.15;
+                    r = 0;
+                    g = 0;
+                    b = Math.floor(t * 80);
+                } else if (normalized < 0.30) {
+                    // Dark blue to blue (15-30%)
+                    var t = (normalized - 0.15) / 0.15;
+                    r = 0;
+                    g = Math.floor(t * 100);
+                    b = 80 + Math.floor(t * 175);
+                } else if (normalized < 0.45) {
+                    // Blue to cyan (30-45%)
+                    var t = (normalized - 0.30) / 0.15;
+                    r = 0;
+                    g = 100 + Math.floor(t * 155);
+                    b = 255;
+                } else if (normalized < 0.60) {
+                    // Cyan to green (45-60%)
+                    var t = (normalized - 0.45) / 0.15;
+                    r = 0;
+                    g = 255;
+                    b = 255 - Math.floor(t * 255);
+                } else if (normalized < 0.75) {
+                    // Green to yellow (60-75%)
+                    var t = (normalized - 0.60) / 0.15;
+                    r = Math.floor(t * 255);
+                    g = 255;
+                    b = 0;
+                } else if (normalized < 0.90) {
+                    // Yellow to orange (75-90%)
+                    var t = (normalized - 0.75) / 0.15;
+                    r = 255;
+                    g = 255 - Math.floor(t * 128);
+                    b = 0;
+                } else {
+                    // Orange to red (90-100%)
+                    var t = (normalized - 0.90) / 0.10;
+                    r = 255;
+                    g = 127 - Math.floor(t * 127);
+                    b = 0;
+                }
+                
+                // Apply intensity with gamma correction for better visual appearance
+                var intensity = waterfallIntensity / 100;
+                var gamma = 1.2; // Slight gamma correction for better contrast
+                r = Math.floor(Math.pow(r / 255.0, 1.0 / gamma) * 255 * intensity);
+                g = Math.floor(Math.pow(g / 255.0, 1.0 / gamma) * 255 * intensity);
+                b = Math.floor(Math.pow(b / 255.0, 1.0 / gamma) * 255 * intensity);
+                
+                waterfallCtx.fillStyle = "rgb(" + r + "," + g + "," + b + ")";
+                waterfallCtx.fillRect(x, y, 1, 1);
+            }
+        }
+        
+        // Control update functions
+        function updateSpectrumGain(value) {
+            spectrumGain = parseFloat(value);
+            document.getElementById("spectrum-gain-value").textContent = spectrumGain;
+            if (currentSpectrumData) {
+                drawSpectrum(currentSpectrumData);
+            }
+        }
+        
+        function updateSpectrumVerticalScale(value) {
+            spectrumVerticalScale = parseFloat(value);
+            document.getElementById("spectrum-vertical-scale-value").textContent = spectrumVerticalScale;
+            if (currentSpectrumData) {
+                drawSpectrum(currentSpectrumData);
+            }
+        }
+        
+        function updateSpectrumVerticalOffset(value) {
+            spectrumVerticalOffset = parseFloat(value);
+            document.getElementById("spectrum-vertical-offset-value").textContent = spectrumVerticalOffset;
+            if (currentSpectrumData) {
+                drawSpectrum(currentSpectrumData);
+            }
+        }
+        
+        function updateSpectrumAveraging(value) {
+            spectrumAveraging = parseInt(value);
+            document.getElementById("spectrum-averaging-value").textContent = spectrumAveraging;
+            spectrumAveragingBuffer = [];  // Clear buffer when changing
+            if (currentSpectrumData) {
+                drawSpectrum(currentSpectrumData);
+            }
+        }
+        
+        function updateWaterfallIntensity(value) {
+            waterfallIntensity = parseInt(value);
+            document.getElementById("waterfall-intensity-value").textContent = waterfallIntensity;
+            // Redraw waterfall with new intensity
+            if (waterfallData.length > 0) {
+                redrawWaterfall();
+            }
+        }
+        
+        function updateWaterfallSpeed(value) {
+            waterfallSpeed = parseInt(value);
+            document.getElementById("waterfall-speed-value").textContent = waterfallSpeed;
+            waterfallSpeedCounter = 0;
+        }
+        
+        
+        function redrawWaterfall() {
+            if (!waterfallCtx || waterfallData.length === 0 || !currentSpectrumData) return;
+            
+            var width = waterfallCanvas.width;
+            var height = waterfallCanvas.height;
+            
+            // Clear
+            waterfallCtx.fillStyle = "#000";
+            waterfallCtx.fillRect(0, 0, width, height);
+            
+            // Use same zoom/pan calculation as spectrum
+            var sampleRate = currentSpectrumData.sample_rate;
+            var centerFreq = currentSpectrumData.center_freq;
+            var fullFreqRange = sampleRate / 2;
+            var fullStartFreq = centerFreq - fullFreqRange;
+            var fullBandwidth = fullFreqRange * 2;
+            var visibleBandwidth = fullBandwidth / spectrumZoom;
+            var visibleStartFreq = fullStartFreq + (fullBandwidth - visibleBandwidth) / 2 - spectrumPan;
+            
+            // Clamp to full bandwidth limits
+            if (visibleStartFreq < fullStartFreq) {
+                visibleStartFreq = fullStartFreq;
+            }
+            var visibleEndFreq = visibleStartFreq + visibleBandwidth;
+            if (visibleEndFreq > fullStartFreq + fullBandwidth) {
+                visibleEndFreq = fullStartFreq + fullBandwidth;
+                visibleStartFreq = visibleEndFreq - visibleBandwidth;
+            }
+            
+            var freqPerBin = fullBandwidth / waterfallData[0].length;
+            
+            // Use same calculation as spectrum
+            var centerDb = -60 + spectrumVerticalOffset;
+            var dbMin = centerDb - (spectrumVerticalScale / 2);
+            var dbMax = centerDb + (spectrumVerticalScale / 2);
+            
+            if (dbMin < -150) {
+                var diff = -150 - dbMin;
+                dbMin = -150;
+                dbMax += diff;
+            }
+            if (dbMax > 0) {
+                var diff = dbMax - 0;
+                dbMax = 0;
+                dbMin -= diff;
+            }
+            
+            for (var lineIdx = 0; lineIdx < waterfallData.length && lineIdx < maxWaterfallLines; lineIdx++) {
+                var y = lineIdx;
+                if (y >= height) break;
+                
+                var spectrumData = waterfallData[lineIdx];
+                if (!spectrumData) continue;
+                
+                for (var x = 0; x < width; x++) {
+                    // Convert pixel X to frequency (same as spectrum)
+                    var freq = visibleStartFreq + (visibleBandwidth * x / width);
+                    // Convert frequency to data point index
+                    var idx = Math.floor((freq - fullStartFreq) / freqPerBin);
+                    if (idx < 0) idx = 0;
+                    if (idx >= spectrumData.length) idx = spectrumData.length - 1;
+                    
+                    var db = spectrumData[idx];
+                    if (db < dbMin) db = dbMin;
+                    if (db > dbMax) db = dbMax;
+                    
+                    // Use same SDR-style color palette as updateWaterfall
+                    var normalized = Math.max(0, Math.min(1, (db - dbMin) / (dbMax - dbMin)));
+                    var r, g, b;
+                    
+                    if (normalized < 0.15) {
+                        var t = normalized / 0.15;
+                        r = 0;
+                        g = 0;
+                        b = Math.floor(t * 80);
+                    } else if (normalized < 0.30) {
+                        var t = (normalized - 0.15) / 0.15;
+                        r = 0;
+                        g = Math.floor(t * 100);
+                        b = 80 + Math.floor(t * 175);
+                    } else if (normalized < 0.45) {
+                        var t = (normalized - 0.30) / 0.15;
+                        r = 0;
+                        g = 100 + Math.floor(t * 155);
+                        b = 255;
+                    } else if (normalized < 0.60) {
+                        var t = (normalized - 0.45) / 0.15;
+                        r = 0;
+                        g = 255;
+                        b = 255 - Math.floor(t * 255);
+                    } else if (normalized < 0.75) {
+                        var t = (normalized - 0.60) / 0.15;
+                        r = Math.floor(t * 255);
+                        g = 255;
+                        b = 0;
+                    } else if (normalized < 0.90) {
+                        var t = (normalized - 0.75) / 0.15;
+                        r = 255;
+                        g = 255 - Math.floor(t * 128);
+                        b = 0;
+                    } else {
+                        var t = (normalized - 0.90) / 0.10;
+                        r = 255;
+                        g = 127 - Math.floor(t * 127);
+                        b = 0;
+                    }
+                    
+                    var intensity = waterfallIntensity / 100;
+                    var gamma = 1.2;
+                    r = Math.floor(Math.pow(r / 255.0, 1.0 / gamma) * 255 * intensity);
+                    g = Math.floor(Math.pow(g / 255.0, 1.0 / gamma) * 255 * intensity);
+                    b = Math.floor(Math.pow(b / 255.0, 1.0 / gamma) * 255 * intensity);
+                    
+                    waterfallCtx.fillStyle = "rgb(" + r + "," + g + "," + b + ")";
+                    waterfallCtx.fillRect(x, y, 1, 1);
+                }
+            }
+        }
+        
+        function resetSpectrumControls() {
+            document.getElementById("spectrum-gain").value = -40;
+            document.getElementById("spectrum-vertical-scale").value = 70;
+            document.getElementById("spectrum-vertical-offset").value = 35;
+            document.getElementById("spectrum-averaging").value = 10;
+            document.getElementById("waterfall-intensity").value = 80;
+            document.getElementById("waterfall-speed").value = 1;
+            
+            updateSpectrumGain(-40);
+            updateSpectrumVerticalScale(70);
+            updateSpectrumVerticalOffset(35);
+            updateSpectrumAveraging(10);
+            updateWaterfallIntensity(80);
+            updateWaterfallSpeed(1);
+            
+            // Reset zoom and pan
+            spectrumZoom = 1.0;
+            spectrumPan = 0.0;
+            if (currentSpectrumData) {
+                drawSpectrum(currentSpectrumData);
+                // Also redraw waterfall
+                if (waterfallData.length > 0) {
+                    redrawWaterfall();
+                }
+            }
+        }
+        
+        function setupSpectrumZoomPan() {
+            if (!spectrumCanvas) return;
+            
+            // Zoom with Ctrl + Scroll
+            spectrumCanvas.addEventListener("wheel", function(e) {
+                if (e.ctrlKey || e.metaKey) {
+                    e.preventDefault();
+                    
+                    if (!currentSpectrumData) return;
+                    
+                    var sampleRate = currentSpectrumData.sample_rate;
+                    var centerFreq = currentSpectrumData.center_freq;
+                    var fullFreqRange = sampleRate / 2;
+                    var fullBandwidth = fullFreqRange * 2;
+                    
+                    // Get mouse position relative to canvas
+                    var rect = spectrumCanvas.getBoundingClientRect();
+                    var mouseX = e.clientX - rect.left;
+                    var oldVisibleBandwidth = fullBandwidth / spectrumZoom;
+                    var oldVisibleStartFreq = centerFreq - fullFreqRange + (fullBandwidth - oldVisibleBandwidth) / 2 - spectrumPan;
+                    var mouseFreq = oldVisibleStartFreq + (oldVisibleBandwidth * mouseX / spectrumCanvas.width);
+                    
+                    // Zoom factor
+                    var zoomFactor = e.deltaY > 0 ? 1.1 : 0.9;
+                    var newZoom = spectrumZoom * zoomFactor;
+                    
+                    // Limit zoom (min 1.0, max 100x)
+                    newZoom = Math.max(1.0, Math.min(100.0, newZoom));
+                    
+                    if (newZoom !== spectrumZoom) {
+                        // Calculate new pan to keep mouse frequency under cursor
+                        var newVisibleBandwidth = fullBandwidth / newZoom;
+                        spectrumZoom = newZoom;
+                        var newVisibleStartFreq = centerFreq - fullFreqRange + (fullBandwidth - newVisibleBandwidth) / 2 - spectrumPan;
+                        var newFreqAtMouse = newVisibleStartFreq + (newVisibleBandwidth * mouseX / spectrumCanvas.width);
+                        spectrumPan += (mouseFreq - newFreqAtMouse);
+                        
+                        // Clamp pan
+                        var maxPan = (fullBandwidth - newVisibleBandwidth) / 2;
+                        spectrumPan = Math.max(-maxPan, Math.min(maxPan, spectrumPan));
+                        
+                        if (currentSpectrumData) {
+                            drawSpectrum(currentSpectrumData);
+                            // Also redraw waterfall to match zoom/pan
+                            if (waterfallData.length > 0) {
+                                redrawWaterfall();
+                            }
+                        }
+                    }
+                }
+            }, { passive: false });
+            
+            // Pan with click and drag
+            spectrumCanvas.addEventListener("mousedown", function(e) {
+                if (spectrumZoom > 1.0) {
+                    isPanning = true;
+                    panStartX = e.clientX;
+                    panStartOffset = spectrumPan;
+                    spectrumCanvas.style.cursor = "grabbing";
+                }
+            });
+            
+            spectrumCanvas.addEventListener("mousemove", function(e) {
+                var rect = spectrumCanvas.getBoundingClientRect();
+                var x = e.clientX - rect.left;
+                var y = e.clientY - rect.top;
+                
+                // Update mouse position and frequency
+                if (x >= 0 && x < spectrumCanvas.width && y >= 0 && y < spectrumCanvas.height) {
+                    mouseX = x;
+                    if (currentSpectrumData) {
+                        var sampleRate = currentSpectrumData.sample_rate;
+                        var centerFreq = currentSpectrumData.center_freq;
+                        var fullFreqRange = sampleRate / 2;
+                        var fullStartFreq = centerFreq - fullFreqRange;
+                        var fullBandwidth = fullFreqRange * 2;
+                        var visibleBandwidth = fullBandwidth / spectrumZoom;
+                        var visibleStartFreq = fullStartFreq + (fullBandwidth - visibleBandwidth) / 2 - spectrumPan;
+                        
+                        // Clamp to full bandwidth limits
+                        if (visibleStartFreq < fullStartFreq) {
+                            visibleStartFreq = fullStartFreq;
+                        }
+                        var visibleEndFreq = visibleStartFreq + visibleBandwidth;
+                        if (visibleEndFreq > fullStartFreq + fullBandwidth) {
+                            visibleEndFreq = fullStartFreq + fullBandwidth;
+                            visibleStartFreq = visibleEndFreq - visibleBandwidth;
+                        }
+                        
+                        mouseFreq = visibleStartFreq + (visibleBandwidth * x / spectrumCanvas.width);
+                        
+                        // Redraw to show cursor line
+                        if (currentSpectrumData) {
+                            drawSpectrum(currentSpectrumData);
+                        }
+                    }
+                } else {
+                    mouseX = -1;
+                    if (currentSpectrumData) {
+                        drawSpectrum(currentSpectrumData);
+                    }
+                }
+                
+                if (isPanning && currentSpectrumData) {
+                    var sampleRate = currentSpectrumData.sample_rate;
+                    var fullFreqRange = sampleRate / 2;
+                    var fullBandwidth = fullFreqRange * 2;
+                    var visibleBandwidth = fullBandwidth / spectrumZoom;
+                    
+                    var deltaX = e.clientX - panStartX;
+                    var deltaFreq = (deltaX / spectrumCanvas.width) * visibleBandwidth;
+                    spectrumPan = panStartOffset + deltaFreq;
+                    
+                    // Clamp pan to limits
+                    var maxPan = (fullBandwidth - visibleBandwidth) / 2;
+                    spectrumPan = Math.max(-maxPan, Math.min(maxPan, spectrumPan));
+                    
+                    if (currentSpectrumData) {
+                        drawSpectrum(currentSpectrumData);
+                        // Also redraw waterfall to match zoom/pan
+                        if (waterfallData.length > 0) {
+                            redrawWaterfall();
+                        }
+                    }
+                } else if (spectrumZoom > 1.0) {
+                    spectrumCanvas.style.cursor = "grab";
+                } else {
+                    spectrumCanvas.style.cursor = "default";
+                }
+            });
+            
+            spectrumCanvas.addEventListener("mouseleave", function(e) {
+                mouseX = -1;
+                if (currentSpectrumData) {
+                    drawSpectrum(currentSpectrumData);
+                }
+                if (isPanning) {
+                    isPanning = false;
+                    spectrumCanvas.style.cursor = spectrumZoom > 1.0 ? "grab" : "default";
+                }
+            });
+            
+            spectrumCanvas.addEventListener("mouseup", function(e) {
+                if (isPanning) {
+                    isPanning = false;
+                    spectrumCanvas.style.cursor = spectrumZoom > 1.0 ? "grab" : "default";
+                }
+            });
+        }
+        
+        // Helper variables for zoom calculations (needed in event handlers)
+        var visibleStartFreq = 0;
+        var visibleBandwidth = 0;
+        
+        function clearWaterfall() {
+            waterfallData = [];
+            if (waterfallCtx) {
+                var width = waterfallCanvas.width;
+                var height = waterfallCanvas.height;
+                waterfallCtx.fillStyle = "#000";
+                waterfallCtx.fillRect(0, 0, width, height);
+            }
+        }
+        
+        // Initialize spectrum when page is shown
+        var originalShowPage = showPage;
+        showPage = function(page) {
+            originalShowPage(page);
+            if (page === "spectrum") {
+                if (!spectrumCanvas) {
+                    setTimeout(initSpectrum, 100);
+                } else {
+                    loadSpectrumDevices();
+                    if (spectrumDevice >= 0 && document.getElementById("spectrum-auto-update").checked) {
+                        startSpectrumUpdate();
+                    }
+                }
+            } else {
+                stopSpectrumUpdate();
+            }
+        };
         
         showPage("home");
     </script>

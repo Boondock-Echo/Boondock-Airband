@@ -64,21 +64,44 @@ static std::string config_file_path;
 static std::mutex config_path_mutex;
 
 // Simple HTTP response helper
-static void send_response(int client_fd, int status_code, const char* status_text, const char* content_type, const char* body, size_t body_len) {
+static void send_response(int client_fd, int status_code, const char* status_text, const char* content_type, const char* body, size_t body_len, const char* content_disposition = NULL) {
     char response[8192];
     int len = snprintf(response, sizeof(response),
         "HTTP/1.1 %d %s\r\n"
         "Content-Type: %s\r\n"
         "Content-Length: %zu\r\n"
+        "%s"
         "Connection: close\r\n"
         "Access-Control-Allow-Origin: *\r\n"
         "\r\n",
-        status_code, status_text, content_type, body_len);
+        status_code, status_text, content_type, body_len,
+        content_disposition ? content_disposition : "");
     
     write(client_fd, response, len);
     if (body && body_len > 0) {
         write(client_fd, body, body_len);
     }
+}
+
+// Simple URL decode function
+static string url_decode(const string& encoded) {
+    string decoded;
+    for (size_t i = 0; i < encoded.length(); i++) {
+        if (encoded[i] == '%' && i + 2 < encoded.length()) {
+            int value;
+            if (sscanf(encoded.substr(i + 1, 2).c_str(), "%x", &value) == 1) {
+                decoded += (char)value;
+                i += 2;
+            } else {
+                decoded += encoded[i];
+            }
+        } else if (encoded[i] == '+') {
+            decoded += ' ';
+        } else {
+            decoded += encoded[i];
+        }
+    }
+    return decoded;
 }
 
 static void send_file_response(int client_fd, const char* content_type, const char* content) {
@@ -658,6 +681,51 @@ static void handle_api_request(int client_fd, const char* path, const char* meth
             send_json_response(client_fd, "{\"status\":\"success\",\"message\":\"Device configuration saved. Restart required.\"}");
         } else {
             send_error(client_fd, 405, "Method not allowed");
+        }
+    } else if (strncmp(path, "/api/spectrum", 13) == 0) {
+        // Spectrum analyzer endpoint: /api/spectrum or /api/spectrum/{device_index}
+        int device_idx = -1;
+        if (strlen(path) > 13) {
+            if (sscanf(path, "/api/spectrum/%d", &device_idx) != 1) {
+                device_idx = -1;
+            }
+        }
+        
+        if (device_idx < 0 || device_idx >= device_count) {
+            // Return list of available devices
+            std::stringstream json;
+            json << "{\"devices\":[";
+            for (int d = 0; d < device_count; d++) {
+                if (d > 0) json << ",";
+                device_t* dev = devices + d;
+                json << "{\"device\":" << d
+                     << ",\"sample_rate\":" << dev->input->sample_rate
+                     << ",\"center_freq\":" << dev->input->centerfreq
+                     << ",\"spectrum_size\":" << dev->spectrum.size << "}";
+            }
+            json << "]}";
+            send_json_response(client_fd, json.str().c_str());
+        } else {
+            // Return spectrum data for specific device
+            device_t* dev = devices + device_idx;
+            pthread_mutex_lock(&dev->spectrum.mutex);
+            
+            std::stringstream json;
+            json << "{\"device\":" << device_idx
+                 << ",\"sample_rate\":" << dev->input->sample_rate
+                 << ",\"center_freq\":" << dev->input->centerfreq
+                 << ",\"spectrum_size\":" << dev->spectrum.size
+                 << ",\"last_update\":" << dev->spectrum.last_update
+                 << ",\"data\":[";
+            
+            for (size_t i = 0; i < dev->spectrum.size; i++) {
+                if (i > 0) json << ",";
+                json << std::fixed << std::setprecision(2) << dev->spectrum.magnitude[i];
+            }
+            json << "]}";
+            
+            pthread_mutex_unlock(&dev->spectrum.mutex);
+            send_json_response(client_fd, json.str().c_str());
         }
     } else if (strcmp(path, "/api/recordings") == 0) {
         string json = get_recordings_json();
@@ -1437,8 +1505,24 @@ static void handle_client(int client_fd) {
         send_file_response(client_fd, "text/html", html);
     } else if (strncmp(path, "/recordings/", 12) == 0) {
         // Serve recording files - find from device channels
-        const char* filename = path + 12;
+        string path_str = path + 12;
+        
+        // Check for download query parameter
+        bool is_download = false;
+        size_t query_pos = path_str.find('?');
+        if (query_pos != string::npos) {
+            string query = path_str.substr(query_pos + 1);
+            if (query == "download=1" || query.find("download=1&") == 0 || query.find("&download=1") != string::npos) {
+                is_download = true;
+            }
+            path_str = path_str.substr(0, query_pos);
+        }
+        
+        // URL decode the filename
+        string filename = url_decode(path_str);
+        
         FILE* f = NULL;
+        string found_filepath;
         
         // Try to find the file in recording directories
         for (int d = 0; d < device_count && !f; d++) {
@@ -1452,7 +1536,10 @@ static void handle_client(int client_fd) {
                         if (!fdata->basedir.empty()) {
                             string filepath = fdata->basedir + "/" + filename;
                             f = fopen(filepath.c_str(), "rb");
-                            if (f) break;
+                            if (f) {
+                                found_filepath = filepath;
+                                break;
+                            }
                         }
                     }
                 }
@@ -1466,7 +1553,28 @@ static void handle_client(int client_fd) {
             char* buffer = (char*)XCALLOC(size, sizeof(char));
             fread(buffer, 1, size, f);
             fclose(f);
-            send_response(client_fd, 200, "OK", "audio/mpeg", buffer, size);
+            
+            // Determine MIME type from extension
+            const char* content_type = "audio/mpeg";
+            size_t ext_pos = filename.rfind('.');
+            if (ext_pos != string::npos) {
+                string ext = filename.substr(ext_pos);
+                if (ext == ".mp3") {
+                    content_type = "audio/mpeg";
+                } else if (ext == ".raw") {
+                    content_type = "application/octet-stream";
+                }
+            }
+            
+            // Add Content-Disposition header for downloads
+            char content_disposition[512] = "";
+            if (is_download) {
+                snprintf(content_disposition, sizeof(content_disposition),
+                    "Content-Disposition: attachment; filename=\"%s\"\r\n",
+                    filename.c_str());
+            }
+            
+            send_response(client_fd, 200, "OK", content_type, buffer, size, content_disposition);
             free(buffer);
         } else {
             send_error(client_fd, 404, "Recording not found");

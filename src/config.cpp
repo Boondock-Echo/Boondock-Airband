@@ -823,6 +823,15 @@ int parse_devices(libconfig::Setting& devs) {
         dev->output_overrun_count = 0;
         dev->waveend = dev->waveavail = dev->row = dev->tq_head = dev->tq_tail = 0;
         dev->last_frequency = -1;
+        
+        // Initialize spectrum analyzer data
+        // Store full FFT size to cover entire bandwidth (DC to Nyquist)
+        dev->spectrum.size = fft_size;
+        dev->spectrum.magnitude = (float*)XCALLOC(dev->spectrum.size, sizeof(float));
+        pthread_mutex_init(&dev->spectrum.mutex, NULL);
+        dev->spectrum.last_update = 0;
+        dev->spectrum.enabled = true;  // Enable by default
+        dev->spectrum.update_counter = 0;
 
         libconfig::Setting& chans = devs[i]["channels"];
         if (chans.getLength() < 1) {

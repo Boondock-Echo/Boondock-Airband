@@ -500,6 +500,36 @@ void* demodulate(void* params) {
         fftwf_execute(demod_params->fft);
 #endif /* WITH_BCM_VC */
 
+        // Update spectrum analyzer data (only update periodically to reduce overhead)
+        dev->spectrum.update_counter++;
+        if (dev->spectrum.enabled && (dev->spectrum.update_counter % 4 == 0)) {  // Update every 4th FFT
+            pthread_mutex_lock(&dev->spectrum.mutex);
+            // Store full bandwidth: map FFT bins to frequency range [center - sample_rate/2, center + sample_rate/2]
+            // FFT output is: [DC, +f1, +f2, ..., +Nyquist, -fN, ..., -f1] (for real signals, symmetric)
+            // We want to display: [center - sample_rate/2, ..., center, ..., center + sample_rate/2]
+            // So we map: spectrum[i] = FFT[(i + fft_size/2) % fft_size] for i = 0 to fft_size-1
+#ifdef WITH_BCM_VC
+            const GPU_FFT_COMPLEX* fftout = fft->out;
+            for (size_t i = 0; i < dev->spectrum.size; i++) {
+                // Map to FFT bin: shift by fft_size/2 to center DC at middle of array
+                size_t bin_idx = (i + fft_size / 2) % fft_size;
+                float mag = sqrtf(fftout[bin_idx].re * fftout[bin_idx].re + fftout[bin_idx].im * fftout[bin_idx].im);
+                // Convert to dB, with minimum floor
+                dev->spectrum.magnitude[i] = 20.0f * log10f(mag + 1e-10f);
+            }
+#else
+            for (size_t i = 0; i < dev->spectrum.size; i++) {
+                // Map to FFT bin: shift by fft_size/2 to center DC at middle of array
+                size_t bin_idx = (i + fft_size / 2) % fft_size;
+                float mag = sqrtf(fftout[bin_idx][0] * fftout[bin_idx][0] + fftout[bin_idx][1] * fftout[bin_idx][1]);
+                // Convert to dB, with minimum floor
+                dev->spectrum.magnitude[i] = 20.0f * log10f(mag + 1e-10f);
+            }
+#endif /* WITH_BCM_VC */
+            dev->spectrum.last_update = time(NULL);
+            pthread_mutex_unlock(&dev->spectrum.mutex);
+        }
+
 #ifdef WITH_BCM_VC
         for (int i = 0; i < dev->channel_count; i++) {
             float* wavein = dev->channels[i].wavein + dev->waveend;
@@ -763,7 +793,7 @@ static bool create_default_config(const char* config_path) {
     fprintf(f, "    gain = \"LNA=12,MIX=10,VGA=10\";\n");
     fprintf(f, "    centerfreq = 162.47500;\n");
     fprintf(f, "    correction = 0;\n");
-    fprintf(f, "    sample_rate = 2.5;\n");
+    fprintf(f, "    sample_rate = 10.0;\n");
     fprintf(f, "    channels:\n");
     fprintf(f, "    (\n");
     
@@ -924,7 +954,7 @@ int main(int argc, char* argv[]) {
             cerr << "Default configuration created with:\n";
             cerr << "  - SoapySDR with Airspy driver\n";
             cerr << "  - Gain: LNA=12, MIX=10, VGA=10\n";
-            cerr << "  - Sample Rate: 2.5 MHz\n";
+            cerr << "  - Sample Rate: 10 MHz\n";
             cerr << "  - Mode: Multichannel\n";
             cerr << "  - All NOAA channels with continuous recording\n";
             cerr << "  - Output directory: recordings/\n\n";

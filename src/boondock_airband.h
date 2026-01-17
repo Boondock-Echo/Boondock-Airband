@@ -301,6 +301,17 @@ struct channel_t {
 };
 
 enum rec_modes { R_MULTICHANNEL, R_SCAN };
+
+// Spectrum analyzer data structure
+struct spectrum_data_t {
+    float* magnitude;           // FFT magnitude data (dB)
+    size_t size;                // Size of magnitude array (fft_size/2)
+    pthread_mutex_t mutex;      // Mutex for thread-safe access
+    time_t last_update;         // Timestamp of last update
+    bool enabled;               // Whether spectrum is enabled
+    int update_counter;         // Counter for throttling updates
+};
+
 struct device_t {
     input_t* input;
 #ifdef NFM
@@ -321,6 +332,7 @@ struct device_t {
     int failed;
     enum rec_modes mode;
     size_t output_overrun_count;
+    spectrum_data_t spectrum;  // Spectrum analyzer data
 };
 
 struct mixinput_t {
