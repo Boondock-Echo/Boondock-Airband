@@ -25,9 +25,12 @@
 #include <cstdlib>
 #include <cstring>
 #include <iostream>
+#include <fstream>
+#include <sstream>
 #include <libconfig.h++>
 #include "input-common.h"  // input_t
 #include "boondock_airband.h"
+#include "helper_functions.h"
 
 using namespace std;
 
@@ -268,6 +271,18 @@ static int parse_outputs(libconfig::Setting& outs, channel_t* channel, int i, in
                 pdata->stream_name = strdup(buf);
             }
 #endif /* WITH_PULSEAUDIO */
+        } else if (!strncmp(outs[o]["type"], "boondock_api", 12)) {
+            // Skeleton for Boondock API - implementation to be defined later
+            channel->outputs[oo].data = XCALLOC(1, sizeof(char) * 256);  // Placeholder
+            channel->outputs[oo].type = O_BOONDOCK_API;
+            // Store minimal data for now - actual implementation will parse api_url and api_key
+            cerr << "Warning: Boondock API output type is not yet implemented (skeleton only)\n";
+        } else if (!strncmp(outs[o]["type"], "redis", 5)) {
+            // Skeleton for Redis - implementation to be defined later
+            channel->outputs[oo].data = XCALLOC(1, sizeof(char) * 256);  // Placeholder
+            channel->outputs[oo].type = O_REDIS;
+            // Store minimal data for now - actual implementation will parse address, port, password, database
+            cerr << "Warning: Redis output type is not yet implemented (skeleton only)\n";
         } else {
             if (parsing_mixers) {
                 cerr << "Configuration error: mixers.[" << i << "] outputs.[" << o << "]: ";
@@ -909,6 +924,529 @@ int parse_mixers(libconfig::Setting& mx) {
         mm++;
     }
     return mm;
+}
+
+// Convert channels.json to libconfig format string
+static string convert_json_to_libconfig(const string& json_path) {
+    ifstream file(json_path);
+    if (!file.is_open()) {
+        cerr << "Cannot open channels.json: " << json_path << "\n";
+        return "";
+    }
+    
+    stringstream libconfig;
+    string line;
+    
+    // Read entire file
+    string json_content;
+    while (getline(file, line)) {
+        json_content += line + "\n";
+    }
+    file.close();
+    
+    // Write global settings
+    libconfig << "fft_size = 2048;\n";
+    libconfig << "localtime = false;\n";
+    libconfig << "multiple_demod_threads = true;\n";
+    libconfig << "multiple_output_threads = true;\n";
+    libconfig << "file_chunk_duration_minutes = 5;\n";
+    libconfig << "\ndevices: (\n";
+    
+    // Simple JSON parsing - extract devices array
+    size_t devices_pos = json_content.find("\"devices\"");
+    if (devices_pos == string::npos) {
+        cerr << "Invalid channels.json: missing devices array\n";
+        return "";
+    }
+    
+    // Find opening bracket of devices array
+    size_t devices_start = json_content.find("[", devices_pos);
+    if (devices_start == string::npos) {
+        cerr << "Invalid channels.json: devices array not found\n";
+        return "";
+    }
+    
+    // Parse devices (simplified - assumes single device for now)
+    size_t device_start = json_content.find("{", devices_start);
+    if (device_start == string::npos) {
+        cerr << "Invalid channels.json: no device found\n";
+        return "";
+    }
+    
+    // Extract device properties using simple string parsing
+    string device_json = json_content.substr(device_start);
+    
+    // Extract type
+    size_t type_pos = device_json.find("\"type\"");
+    string device_type = "rtlsdr";
+    if (type_pos != string::npos) {
+        size_t colon = device_json.find(":", type_pos);
+        size_t quote1 = device_json.find("\"", colon);
+        size_t quote2 = device_json.find("\"", quote1 + 1);
+        if (quote1 != string::npos && quote2 != string::npos) {
+            device_type = device_json.substr(quote1 + 1, quote2 - quote1 - 1);
+        }
+    }
+    
+    // Extract sample_rate
+    size_t sample_rate_pos = device_json.find("\"sample_rate\"");
+    string sample_rate = "2.40";
+    if (sample_rate_pos != string::npos) {
+        size_t colon = device_json.find(":", sample_rate_pos);
+        size_t end = device_json.find_first_of(",}", colon);
+        if (end != string::npos) {
+            sample_rate = device_json.substr(colon + 1, end - colon - 1);
+            sample_rate.erase(0, sample_rate.find_first_not_of(" \t\n"));
+            sample_rate.erase(sample_rate.find_last_not_of(" \t\n") + 1);
+        }
+    }
+    
+    // Extract centerfreq
+    size_t centerfreq_pos = device_json.find("\"centerfreq\"");
+    string centerfreq = "162.48200";
+    if (centerfreq_pos != string::npos) {
+        size_t colon = device_json.find(":", centerfreq_pos);
+        size_t end = device_json.find_first_of(",}", colon);
+        if (end != string::npos) {
+            centerfreq = device_json.substr(colon + 1, end - colon - 1);
+            centerfreq.erase(0, centerfreq.find_first_not_of(" \t\n"));
+            centerfreq.erase(centerfreq.find_last_not_of(" \t\n") + 1);
+        }
+    }
+    
+    // Extract gain
+    size_t gain_pos = device_json.find("\"gain\"");
+    string gain = "19.7";
+    if (gain_pos != string::npos) {
+        size_t colon = device_json.find(":", gain_pos);
+        size_t end = device_json.find_first_of(",}", colon);
+        if (end != string::npos) {
+            gain = device_json.substr(colon + 1, end - colon - 1);
+            gain.erase(0, gain.find_first_not_of(" \t\n"));
+            gain.erase(gain.find_last_not_of(" \t\n") + 1);
+        }
+    }
+    
+    // Extract correction
+    size_t correction_pos = device_json.find("\"correction\"");
+    string correction = "0";
+    if (correction_pos != string::npos) {
+        size_t colon = device_json.find(":", correction_pos);
+        size_t end = device_json.find_first_of(",}", colon);
+        if (end != string::npos) {
+            correction = device_json.substr(colon + 1, end - colon - 1);
+            correction.erase(0, correction.find_first_not_of(" \t\n"));
+            correction.erase(correction.find_last_not_of(" \t\n") + 1);
+        }
+    }
+    
+    // Extract index
+    size_t index_pos = device_json.find("\"index\"");
+    string index = "0";
+    if (index_pos != string::npos) {
+        size_t colon = device_json.find(":", index_pos);
+        size_t end = device_json.find_first_of(",}", colon);
+        if (end != string::npos) {
+            index = device_json.substr(colon + 1, end - colon - 1);
+            index.erase(0, index.find_first_not_of(" \t\n"));
+            index.erase(index.find_last_not_of(" \t\n") + 1);
+        }
+    }
+    
+    // Write device header
+    libconfig << "  {\n";
+    libconfig << "    type = \"" << device_type << "\";\n";
+    libconfig << "    index = " << index << ";\n";
+    libconfig << "    gain = " << gain << ";\n";
+    libconfig << "    centerfreq = " << centerfreq << ";\n";
+    libconfig << "    correction = " << correction << ";\n";
+    libconfig << "    sample_rate = " << sample_rate << ";\n";
+    libconfig << "    channels: (\n";
+    
+    // Extract channels array
+    size_t channels_pos = device_json.find("\"channels\"");
+    if (channels_pos == string::npos) {
+        cerr << "Invalid channels.json: no channels array\n";
+        return "";
+    }
+    
+    size_t channels_start = device_json.find("[", channels_pos);
+    if (channels_start == string::npos) {
+        cerr << "Invalid channels.json: channels array not found\n";
+        return "";
+    }
+    
+    // Parse each channel
+    size_t channel_start = channels_start;
+    int channel_num = 0;
+    while ((channel_start = device_json.find("{", channel_start)) != string::npos) {
+        // Find the matching closing brace (handle nested braces)
+        int brace_count = 0;
+        size_t channel_end = channel_start;
+        while (channel_end < device_json.length() && channel_end <= device_json.find("]", channels_start)) {
+            if (device_json[channel_end] == '{') brace_count++;
+            if (device_json[channel_end] == '}') {
+                brace_count--;
+                if (brace_count == 0) break;
+            }
+            channel_end++;
+        }
+        if (channel_end == device_json.length()) break;
+        
+        string channel_json = device_json.substr(channel_start, channel_end - channel_start + 1);
+        
+        // Check if channel is enabled
+        size_t enabled_pos = channel_json.find("\"enabled\"");
+        bool channel_enabled = true;
+        if (enabled_pos != string::npos) {
+            size_t colon = channel_json.find(":", enabled_pos);
+            size_t end = channel_json.find_first_of(",}", colon);
+            if (end != string::npos) {
+                string enabled_str = channel_json.substr(colon + 1, end - colon - 1);
+                enabled_str.erase(0, enabled_str.find_first_not_of(" \t\n"));
+                enabled_str.erase(enabled_str.find_last_not_of(" \t\n") + 1);
+                channel_enabled = (enabled_str == "true");
+            }
+        }
+        
+        // Only process enabled channels
+        if (!channel_enabled) {
+            channel_start = channel_end + 1;
+            continue;
+        }
+        
+        // Extract channel properties
+        // freq
+        size_t freq_pos = channel_json.find("\"freq\"");
+        string freq = "0";
+        if (freq_pos != string::npos) {
+            size_t colon = channel_json.find(":", freq_pos);
+            size_t end = channel_json.find_first_of(",}", colon);
+            if (end != string::npos) {
+                freq = channel_json.substr(colon + 1, end - colon - 1);
+                freq.erase(0, freq.find_first_not_of(" \t\n"));
+                freq.erase(freq.find_last_not_of(" \t\n") + 1);
+            }
+        }
+        
+        // label
+        size_t label_pos = channel_json.find("\"label\"");
+        string label = "";
+        if (label_pos != string::npos) {
+            size_t colon = channel_json.find(":", label_pos);
+            size_t quote1 = channel_json.find("\"", colon);
+            size_t quote2 = channel_json.find("\"", quote1 + 1);
+            if (quote1 != string::npos && quote2 != string::npos) {
+                label = channel_json.substr(quote1 + 1, quote2 - quote1 - 1);
+            }
+        }
+        
+        // modulation
+        size_t mod_pos = channel_json.find("\"modulation\"");
+        string modulation = "nfm";
+        if (mod_pos != string::npos) {
+            size_t colon = channel_json.find(":", mod_pos);
+            size_t quote1 = channel_json.find("\"", colon);
+            size_t quote2 = channel_json.find("\"", quote1 + 1);
+            if (quote1 != string::npos && quote2 != string::npos) {
+                modulation = channel_json.substr(quote1 + 1, quote2 - quote1 - 1);
+            }
+        }
+        
+        // bandwidth
+        size_t bw_pos = channel_json.find("\"bandwidth\"");
+        string bandwidth = "12000";
+        if (bw_pos != string::npos) {
+            size_t colon = channel_json.find(":", bw_pos);
+            size_t end = channel_json.find_first_of(",}", colon);
+            if (end != string::npos) {
+                bandwidth = channel_json.substr(colon + 1, end - colon - 1);
+                bandwidth.erase(0, bandwidth.find_first_not_of(" \t\n"));
+                bandwidth.erase(bandwidth.find_last_not_of(" \t\n") + 1);
+            }
+        }
+        
+        // Write channel
+        libconfig << "      {\n";
+        libconfig << "        freq = " << freq << ";\n";
+        if (!label.empty()) {
+            libconfig << "        label = \"" << label << "\";\n";
+        }
+        libconfig << "        modulation = \"" << modulation << "\";\n";
+        libconfig << "        bandwidth = " << bandwidth << ";\n";
+        
+        // Parse outputs
+        size_t outputs_pos = channel_json.find("\"outputs\"");
+        if (outputs_pos != string::npos) {
+            size_t outputs_start = channel_json.find("[", outputs_pos);
+            if (outputs_start != string::npos) {
+                libconfig << "        outputs: (\n";
+                
+                size_t output_start = outputs_start;
+                int output_num = 0;
+                while ((output_start = channel_json.find("{", output_start)) != string::npos) {
+                    // Find the matching closing brace (handle nested braces)
+                    int output_brace_count = 0;
+                    size_t output_end = output_start;
+                    while (output_end < channel_json.length() && output_end <= channel_json.find("]", outputs_start)) {
+                        if (channel_json[output_end] == '{') output_brace_count++;
+                        if (channel_json[output_end] == '}') {
+                            output_brace_count--;
+                            if (output_brace_count == 0) break;
+                        }
+                        output_end++;
+                    }
+                    if (output_end == channel_json.length() || output_end > channel_json.find("]", outputs_start)) break;
+                    
+                    string output_json = channel_json.substr(output_start, output_end - output_start + 1);
+                    
+                    // Debug: check if directory is in the extracted JSON
+                    if (output_json.find("\"directory\"") != string::npos) {
+                        size_t dir_debug = output_json.find("\"directory\"");
+                        size_t dir_debug_end = min(dir_debug + 100, output_json.length());
+                        cerr << "DEBUG output_json (around directory): " << output_json.substr(dir_debug, dir_debug_end - dir_debug) << "\n";
+                    }
+                    
+                    // Check if output is enabled
+                    size_t out_enabled_pos = output_json.find("\"enabled\"");
+                    bool output_enabled = true;
+                    if (out_enabled_pos != string::npos) {
+                        size_t colon = output_json.find(":", out_enabled_pos);
+                        size_t end = output_json.find_first_of(",}", colon);
+                        if (end != string::npos) {
+                            string enabled_str = output_json.substr(colon + 1, end - colon - 1);
+                            enabled_str.erase(0, enabled_str.find_first_not_of(" \t\n"));
+                            enabled_str.erase(enabled_str.find_last_not_of(" \t\n") + 1);
+                            output_enabled = (enabled_str == "true");
+                        }
+                    }
+                    
+                    if (!output_enabled) {
+                        output_start = output_end + 1;
+                        continue;
+                    }
+                    
+                    // Extract output type
+                    size_t output_type_pos = output_json.find("\"type\"");
+                    string output_type = "file";
+                    if (output_type_pos != string::npos) {
+                        size_t colon = output_json.find(":", output_type_pos);
+                        size_t quote1 = output_json.find("\"", colon);
+                        size_t quote2 = output_json.find("\"", quote1 + 1);
+                        if (quote1 != string::npos && quote2 != string::npos) {
+                            output_type = output_json.substr(quote1 + 1, quote2 - quote1 - 1);
+                        }
+                    }
+                    
+                    libconfig << "          {\n";
+                    libconfig << "            type = \"" << output_type << "\";\n";
+                    
+                    // Extract directory
+                    size_t dir_pos = output_json.find("\"directory\"");
+                    if (dir_pos != string::npos) {
+                        size_t colon = output_json.find(":", dir_pos);
+                        if (colon != string::npos) {
+                            // Skip whitespace after colon
+                            size_t value_start = colon + 1;
+                            while (value_start < output_json.length() && (output_json[value_start] == ' ' || output_json[value_start] == '\t')) {
+                                value_start++;
+                            }
+                            // Find the opening quote after the colon
+                            if (value_start < output_json.length() && output_json[value_start] == '"') {
+                                size_t quote1 = value_start;
+                                // Find the closing quote, starting from after the opening quote
+                                size_t quote2 = quote1 + 1;
+                                while (quote2 < output_json.length() && output_json[quote2] != '"') {
+                                    // Handle escaped quotes
+                                    if (output_json[quote2] == '\\' && quote2 + 1 < output_json.length()) {
+                                        quote2 += 2;
+                                    } else {
+                                        quote2++;
+                                    }
+                                }
+                                if (quote2 < output_json.length()) {
+                                    string directory = output_json.substr(quote1 + 1, quote2 - quote1 - 1);
+                                    // Escape quotes in the directory string for libconfig
+                                    string escaped_dir = directory;
+                                    size_t esc_pos = 0;
+                                    while ((esc_pos = escaped_dir.find("\"", esc_pos)) != string::npos) {
+                                        escaped_dir.replace(esc_pos, 1, "\\\"");
+                                        esc_pos += 2;
+                                    }
+                                    libconfig << "            directory = \"" << escaped_dir << "\";\n";
+                                }
+                            }
+                        }
+                    }
+                    
+                    // Extract filename_template
+                    size_t filename_pos = output_json.find("\"filename_template\"");
+                    if (filename_pos != string::npos) {
+                        size_t colon = output_json.find(":", filename_pos);
+                        if (colon != string::npos) {
+                            // Skip whitespace after colon
+                            size_t value_start = colon + 1;
+                            while (value_start < output_json.length() && (output_json[value_start] == ' ' || output_json[value_start] == '\t')) {
+                                value_start++;
+                            }
+                            // Find the opening quote after the colon
+                            if (value_start < output_json.length() && output_json[value_start] == '"') {
+                                size_t quote1 = value_start;
+                                // Find the closing quote, starting from after the opening quote
+                                size_t quote2 = quote1 + 1;
+                                while (quote2 < output_json.length() && output_json[quote2] != '"') {
+                                    // Handle escaped quotes
+                                    if (output_json[quote2] == '\\' && quote2 + 1 < output_json.length()) {
+                                        quote2 += 2;
+                                    } else {
+                                        quote2++;
+                                    }
+                                }
+                                if (quote2 < output_json.length()) {
+                                    string filename = output_json.substr(quote1 + 1, quote2 - quote1 - 1);
+                                    // Escape quotes in the filename string for libconfig
+                                    string escaped_filename = filename;
+                                    size_t esc_pos = 0;
+                                    while ((esc_pos = escaped_filename.find("\"", esc_pos)) != string::npos) {
+                                        escaped_filename.replace(esc_pos, 1, "\\\"");
+                                        esc_pos += 2;
+                                    }
+                                    libconfig << "            filename_template = \"" << escaped_filename << "\";\n";
+                                }
+                            }
+                        }
+                    }
+                    
+                    // Extract continuous
+                    size_t cont_pos = output_json.find("\"continuous\"");
+                    if (cont_pos != string::npos) {
+                        size_t colon = output_json.find(":", cont_pos);
+                        size_t end = output_json.find_first_of(",}", colon);
+                        if (end != string::npos) {
+                            string cont_str = output_json.substr(colon + 1, end - colon - 1);
+                            cont_str.erase(0, cont_str.find_first_not_of(" \t\n"));
+                            cont_str.erase(cont_str.find_last_not_of(" \t\n") + 1);
+                            libconfig << "            continuous = " << (cont_str == "true" ? "true" : "false") << ";\n";
+                        }
+                    }
+                    
+                    // Extract split_on_transmission
+                    size_t split_pos = output_json.find("\"split_on_transmission\"");
+                    if (split_pos != string::npos) {
+                        size_t colon = output_json.find(":", split_pos);
+                        size_t end = output_json.find_first_of(",}", colon);
+                        if (end != string::npos) {
+                            string split_str = output_json.substr(colon + 1, end - colon - 1);
+                            split_str.erase(0, split_str.find_first_not_of(" \t\n"));
+                            split_str.erase(split_str.find_last_not_of(" \t\n") + 1);
+                            libconfig << "            split_on_transmission = " << (split_str == "true" ? "true" : "false") << ";\n";
+                        }
+                    }
+                    
+                    // Extract include_freq
+                    size_t inc_freq_pos = output_json.find("\"include_freq\"");
+                    if (inc_freq_pos != string::npos) {
+                        size_t colon = output_json.find(":", inc_freq_pos);
+                        size_t end = output_json.find_first_of(",}", colon);
+                        if (end != string::npos) {
+                            string inc_freq_str = output_json.substr(colon + 1, end - colon - 1);
+                            inc_freq_str.erase(0, inc_freq_str.find_first_not_of(" \t\n"));
+                            inc_freq_str.erase(inc_freq_str.find_last_not_of(" \t\n") + 1);
+                            libconfig << "            include_freq = " << (inc_freq_str == "true" ? "true" : "false") << ";\n";
+                        }
+                    }
+                    
+                    // Extract append
+                    size_t append_pos = output_json.find("\"append\"");
+                    if (append_pos != string::npos) {
+                        size_t colon = output_json.find(":", append_pos);
+                        size_t end = output_json.find_first_of(",}", colon);
+                        if (end != string::npos) {
+                            string append_str = output_json.substr(colon + 1, end - colon - 1);
+                            append_str.erase(0, append_str.find_first_not_of(" \t\n"));
+                            append_str.erase(append_str.find_last_not_of(" \t\n") + 1);
+                            libconfig << "            append = " << (append_str == "true" ? "true" : "false") << ";\n";
+                        }
+                    }
+                    
+                    // Extract dated_subdirectories
+                    size_t dated_pos = output_json.find("\"dated_subdirectories\"");
+                    if (dated_pos != string::npos) {
+                        size_t colon = output_json.find(":", dated_pos);
+                        size_t end = output_json.find_first_of(",}", colon);
+                        if (end != string::npos) {
+                            string dated_str = output_json.substr(colon + 1, end - colon - 1);
+                            dated_str.erase(0, dated_str.find_first_not_of(" \t\n"));
+                            dated_str.erase(dated_str.find_last_not_of(" \t\n") + 1);
+                            libconfig << "            dated_subdirectories = " << (dated_str == "true" ? "true" : "false") << ";\n";
+                        }
+                    }
+                    
+                    libconfig << "          }";
+                    if (output_num > 0) {
+                        libconfig << ",";
+                    }
+                    libconfig << "\n";
+                    output_num++;
+                    output_start = output_end + 1;
+                }
+                
+                libconfig << "        );\n";
+            }
+        }
+        
+        libconfig << "      }\n";
+        channel_num++;
+        channel_start = channel_end + 1;
+    }
+    
+    libconfig << "    );\n";
+    libconfig << "  }\n";
+    libconfig << ");\n";
+    
+    return libconfig.str();
+}
+
+// Read configuration from channels.json and convert to libconfig Config object
+bool read_config_from_channels_json(const char* json_path, libconfig::Config& config) {
+    if (!file_exists(json_path)) {
+        cerr << "channels.json not found: " << json_path << "\n";
+        return false;
+    }
+    
+    string libconfig_str = convert_json_to_libconfig(json_path);
+    if (libconfig_str.empty()) {
+        return false;
+    }
+    
+    // Debug: write generated config to stderr for troubleshooting
+    // Find the directory line to see what's being generated
+    size_t dir_debug_pos = libconfig_str.find("directory =");
+    if (dir_debug_pos != string::npos) {
+        size_t dir_debug_end = libconfig_str.find("\n", dir_debug_pos);
+        if (dir_debug_end != string::npos) {
+            cerr << "DEBUG directory line: " << libconfig_str.substr(dir_debug_pos, dir_debug_end - dir_debug_pos) << "\n";
+        }
+    }
+    cerr << "Generated libconfig (first 500 chars):\n" << libconfig_str.substr(0, 500) << "\n";
+    
+    try {
+        config.readString(libconfig_str.c_str());
+        return true;
+    } catch (const libconfig::ParseException& e) {
+        cerr << "Error parsing converted config: " << e.getError() << " at line " << e.getLine() << "\n";
+        // Output the problematic line for debugging
+        stringstream ss(libconfig_str);
+        string line;
+        int line_num = 1;
+        while (getline(ss, line) && line_num <= e.getLine() + 2) {
+            if (line_num >= e.getLine() - 2) {
+                cerr << (line_num == e.getLine() ? ">>> " : "    ") << line_num << ": " << line << "\n";
+            }
+            line_num++;
+        }
+        return false;
+    }
 }
 
 // vim: ts=4

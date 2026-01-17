@@ -538,8 +538,8 @@ static void close_if_necessary(output_t* output) {
         return;
     }
 
-    // Check if the hour boundary was just crossed.  NOTE: Actual hour number doesn't matter but still
-    // need to use localtime if enabled (some timezones have partial hour offsets)
+    // Check if the hour boundary was just crossed OR if chunk duration has been exceeded
+    // NOTE: Actual hour number doesn't matter but still need to use localtime if enabled (some timezones have partial hour offsets)
     int start_hour;
     int current_hour;
     if (use_localtime) {
@@ -550,8 +550,18 @@ static void close_if_necessary(output_t* output) {
         current_hour = gmtime(&current_time.tv_sec)->tm_hour;
     }
 
-    if (start_hour != current_hour) {
-        debug_print("closing file %s after crossing hour boundary\n", fdata->file_path.c_str());
+    // Check if chunk duration has been exceeded
+    // Use a larger buffer (5 seconds) to account for processing delays and ensure files don't exceed the limit
+    double duration_sec = delta_sec(&fdata->open_time, &current_time);
+    bool chunk_duration_exceeded = (duration_sec >= (MAX_TRANSMISSION_TIME_SEC - 5.0));
+
+    if (start_hour != current_hour || chunk_duration_exceeded) {
+        if (chunk_duration_exceeded) {
+            log(LOG_INFO, "closing file %s after chunk duration exceeded (%f sec >= %f sec)\n", 
+                       fdata->file_path.c_str(), duration_sec, MAX_TRANSMISSION_TIME_SEC);
+        } else {
+            debug_print("closing file %s after crossing hour boundary\n", fdata->file_path.c_str());
+        }
         // Flush metadata before closing
         if (fdata->metadata_f && !fdata->metadata_buffer.empty()) {
             flush_metadata_buffer(fdata);
@@ -695,6 +705,19 @@ void process_outputs(channel_t* channel, int cur_scan_freq) {
                 continue;
             }
 
+            // For continuous recording, check chunk duration before each write
+            if (fdata->continuous && fdata->f) {
+                close_if_necessary(&channel->outputs[k]);
+                // If file was closed, we need to open a new one
+                if (!fdata->f) {
+                    if (!output_file_ready(channel, &channel->outputs[k])) {
+                        log(LOG_WARNING, "Output disabled\n");
+                        channel->outputs[k].enabled = false;
+                        continue;
+                    }
+                }
+            }
+
             if (!output_file_ready(channel, &channel->outputs[k])) {
                 log(LOG_WARNING, "Output disabled\n");
                 channel->outputs[k].enabled = false;
@@ -723,6 +746,12 @@ void process_outputs(channel_t* channel, int cur_scan_freq) {
             } else if (channel->outputs[k].type == O_RAWFILE) {
                 buflen = 2 * sizeof(float) * WAVE_BATCH;
                 written = fwrite(channel->iq_out, 1, buflen, fdata->f);
+            }
+            
+            // For continuous recording, check chunk duration after write as well
+            // This ensures we don't exceed the limit even if the check before write missed it
+            if (fdata->continuous && fdata->f) {
+                close_if_necessary(&channel->outputs[k]);
             }
             if (written < buflen) {
                 if (ferror(fdata->f))

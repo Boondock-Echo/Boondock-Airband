@@ -106,7 +106,9 @@ enum output_type {
     O_FILE,
     O_RAWFILE,
     O_MIXER,
-    O_UDP_STREAM
+    O_UDP_STREAM,
+    O_BOONDOCK_API,  // Skeleton - implementation to be defined later
+    O_REDIS          // Skeleton - implementation to be defined later
 #ifdef WITH_PULSEAUDIO
     ,
     O_PULSE
@@ -397,6 +399,7 @@ extern size_t fft_size, fft_size_log;
 extern int device_count, mixer_count;
 extern int shout_metadata_delay;
 extern volatile int do_exit, device_opened, do_reload;
+extern volatile int capture_enabled;  // Control flag for capture process (can be stopped/started)
 extern float alpha;
 extern int file_chunk_duration_minutes;  // Global file chunking duration (5-60 minutes, default 60)
 extern device_t* devices;

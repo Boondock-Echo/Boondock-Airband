@@ -70,27 +70,8 @@ function initSpectrum() {
     // Load channels data for markers
     loadChannelsForSpectrum();
     
-    // Setup device selector
-    document.getElementById("spectrum-device-select").addEventListener("change", function() {
-        var val = this.value;
-        spectrumDevice = val === "" ? -1 : parseInt(val);
-        // Reload channels when device changes
-        loadChannelsForSpectrum();
-        if (spectrumDevice >= 0) {
-            startSpectrumUpdate();
-        } else {
-            stopSpectrumUpdate();
-        }
-    });
-    
-    // Setup auto-update checkbox
-    document.getElementById("spectrum-auto-update").addEventListener("change", function() {
-        if (this.checked && spectrumDevice >= 0) {
-            startSpectrumUpdate();
-        } else {
-            stopSpectrumUpdate();
-        }
-    });
+    // Device selector is hidden - always use first device
+    // Auto-update is always enabled
     
     // Setup zoom and pan controls
     setupSpectrumZoomPan();
@@ -136,14 +117,11 @@ function loadSpectrumDevices() {
                     opt.textContent = "Device " + dev.device + " (" + (dev.center_freq / 1000000).toFixed(3) + " MHz, " + (dev.sample_rate / 1000).toFixed(0) + " kHz)";
                     select.appendChild(opt);
                 });
-                // Auto-select if only one device
-                if (data.devices.length === 1) {
-                    select.value = data.devices[0].device;
-                    spectrumDevice = parseInt(data.devices[0].device);
-                    if (document.getElementById("spectrum-auto-update") && document.getElementById("spectrum-auto-update").checked) {
-                        startSpectrumUpdate();
-                    }
-                }
+                // Always auto-select first device (device selector is hidden)
+                select.value = data.devices[0].device;
+                spectrumDevice = parseInt(data.devices[0].device);
+                // Auto-update is always enabled
+                startSpectrumUpdate();
             } else {
                 select.innerHTML = "<option value=\"\">No devices available</option>";
             }
@@ -176,10 +154,10 @@ function toggleDisplayControls() {
     var arrow = document.getElementById("display-controls-arrow");
     if (content.style.display === "none") {
         content.style.display = "block";
-        arrow.textContent = "â–²";
+        arrow.textContent = "▲";
     } else {
         content.style.display = "none";
-        arrow.textContent = "â–¼";
+        arrow.textContent = "▼";
     }
 }
 
@@ -1095,7 +1073,8 @@ function initSpectrumModule(showPageFunction) {
                 setTimeout(initSpectrum, 100);
             } else {
                 loadSpectrumDevices();
-                if (spectrumDevice >= 0 && document.getElementById("spectrum-auto-update") && document.getElementById("spectrum-auto-update").checked) {
+                // Auto-update is always enabled when device is available
+                if (spectrumDevice >= 0) {
                     startSpectrumUpdate();
                 }
             }

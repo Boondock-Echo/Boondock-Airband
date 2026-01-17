@@ -78,6 +78,7 @@ int tui = 0;  // do not display textual user interface
 int shout_metadata_delay = 3;
 volatile int do_exit = 0;
 volatile int do_reload = 0;  // Signal to reload configuration
+volatile int capture_enabled = 1;  // Capture process enabled by default
 bool use_localtime = false;
 bool multiple_demod_threads = false;
 bool multiple_output_threads = false;
@@ -413,6 +414,12 @@ void* demodulate(void* params) {
         else
             available = dev->input->buf_size - dev->input->bufs + dev->input->bufe;
         pthread_mutex_unlock(&dev->input->buffer_lock);
+
+        // Check if capture is enabled
+        if (!capture_enabled) {
+            SLEEP(100);  // Sleep briefly when capture is disabled
+            continue;
+        }
 
         if (devices_running == 0) {
             log(LOG_ERR, "All receivers failed, exiting\n");
@@ -783,8 +790,9 @@ static bool create_default_config(const char* config_path) {
     
     fprintf(f, "# Default Boondock Airband configuration\n");
     fprintf(f, "# Generated automatically - modify as needed\n\n");
-    fprintf(f, "fft_size = 1024;\n");
-    fprintf(f, "localtime = true;\n\n");
+    fprintf(f, "fft_size = 2048;\n");
+    fprintf(f, "localtime = false;\n");
+    fprintf(f, "file_chunk_duration_minutes = 5;\n\n");
     fprintf(f, "devices:\n");
     fprintf(f, "(\n");
     fprintf(f, "  {\n");
@@ -808,18 +816,16 @@ static bool create_default_config(const char* config_path) {
         fprintf(f, "        freq = %.5f;\n", noaa_freqs[i]);
         fprintf(f, "        label = \"%s\";\n", noaa_labels[i]);
         fprintf(f, "        modulation = \"nfm\";\n");
-        fprintf(f, "        lowpass = -1;\n");
-        fprintf(f, "        highpass = -1;\n");
-        fprintf(f, "        bandwidth = 5000;\n");
-        fprintf(f, "        ampfactor = 2.00;\n");
-        fprintf(f, "        squelch_snr_threshold = 0.00;\n");
+        fprintf(f, "        bandwidth = 12000;\n");
         fprintf(f, "        outputs:\n");
         fprintf(f, "        (\n");
         fprintf(f, "          {\n");
         fprintf(f, "            type = \"file\";\n");
-        fprintf(f, "            directory = \"recordings\";\n");
+        fprintf(f, "            directory = \"recordings/%s\";\n", noaa_labels[i]);
         fprintf(f, "            filename_template = \"%s\";\n", noaa_labels[i]);
         fprintf(f, "            continuous = true;\n");
+        fprintf(f, "            include_freq = true;\n");
+        fprintf(f, "            dated_subdirectories = true;\n");
         fprintf(f, "          }\n");
         fprintf(f, "        );\n");
         fprintf(f, "      }%s\n", (i < num_channels - 1) ? "," : "");

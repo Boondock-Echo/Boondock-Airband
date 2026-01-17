@@ -115,7 +115,7 @@ option(NFM "Enable support for narrow FM channels" ON)
 
 set(PLATFORM "native" CACHE STRING "Optimize the build for the given hardware platform")
 
-option(RTLSDR "Enable RTL-SDR support" OFF)
+option(RTLSDR "Enable RTL-SDR support" ON)
 set(WITH_RTLSDR FALSE)
 
 option(MIRISDR "Enable Mirics support" ON)
@@ -350,12 +350,6 @@ target_link_libraries (boondock_airband
 
 install(TARGETS boondock_airband
 	RUNTIME DESTINATION bin
-)
-
-# Install web UI HTML file
-install(FILES web_ui.html
-	DESTINATION share/boondock_airband
-	OPTIONAL
 )
 
 # TODO: install config if not present

@@ -8,7 +8,9 @@
 </head>
 <body>
     <div class="header">
-        <button id="apply-changes-btn" class="apply-changes-btn" onclick="applyChanges()" disabled>Apply Changes</button>
+        <div style="position: absolute; top: 20px; right: 20px;">
+            <button id="capture-control-btn" class="btn" onclick="toggleCapture()" style="padding: 10px 20px; background: #dc3545; color: white; border: none; border-radius: 4px; cursor: pointer; font-size: 14px; font-weight: 600;">Stop Capture</button>
+        </div>
         <div class="nav">
             <a href="#" class="nav-link active" data-page="home">Home</a>
             <a href="#" class="nav-link" data-page="recordings">Recordings</a>
@@ -25,27 +27,26 @@
                 <div class="metric">
                     <h3>Today's Recordings</h3>
                     <div class="value" id="recordings-count">0</div>
-                    <div style="font-size: 12px; color: #666; margin-top: 5px;">Uptime: <span id="uptime">0s</span></div>
+                    <div style="font-size: 10px; color: #aaa; margin-top: 3px;">Uptime: <span id="uptime">0s</span></div>
                 </div>
                 <div class="metric">
                     <h3>CPU Usage</h3>
                     <div class="value" id="cpu-usage">0%</div>
-                    <div style="font-size: 12px; color: #666; margin-top: 5px;">Avg: <span id="cpu-avg">0%</span></div>
+                    <div style="font-size: 10px; color: #aaa; margin-top: 3px;">Avg: <span id="cpu-avg">0%</span></div>
                 </div>
                 <div class="metric">
                     <h3>Disk Usage</h3>
                     <div class="value" id="disk-usage">0 GB</div>
-                    <div style="font-size: 12px; color: #666; margin-top: 5px;">Total: <span id="disk-total">0 GB</span></div>
+                    <div style="font-size: 10px; color: #aaa; margin-top: 3px;">Total: <span id="disk-total">0 GB</span></div>
                 </div>
                 <div class="metric">
                     <h3>RAM Usage</h3>
                     <div class="value" id="ram-usage">0%</div>
-                    <div style="font-size: 12px; color: #666; margin-top: 5px;">Avg: <span id="ram-avg">0%</span></div>
+                    <div style="font-size: 10px; color: #aaa; margin-top: 3px;">Avg: <span id="ram-avg">0%</span></div>
                 </div>
             </div>
             <div class="card">
-                <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px;">
-                    <h2>Channel Status</h2>
+                <div style="display: flex; justify-content: flex-end; align-items: center; margin-bottom: 10px;">
                     <button class="btn btn-primary" onclick="showColumnSelector()" style="font-size: 12px; padding: 5px 10px;">⚙️ View</button>
                 </div>
                 <table id="channels-table">
@@ -66,7 +67,7 @@
                     </thead>
                     <tbody id="channels-tbody"></tbody>
                 </table>
-                <div style="margin-top: 10px; font-size: 14px; color: #666;">
+                <div style="margin-top: 10px; font-size: 14px; color: #aaa;">
                     <span id="channels-count">0</span> channels | <span id="service-status">Running</span> | Polling every 1s
                 </div>
             </div>
@@ -76,7 +77,7 @@
                 <div class="modal-content" style="max-width: 400px;" onclick="event.stopPropagation();">
                     <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 15px;">
                         <h3>Select Columns</h3>
-                        <span onclick="closeColumnSelector()" style="cursor: pointer; font-size: 24px; color: #999;">&times;</span>
+                        <span onclick="closeColumnSelector()" style="cursor: pointer; font-size: 24px; color: #aaa;">&times;</span>
                     </div>
                     <div id="column-checkboxes" style="display: grid; grid-template-columns: 1fr 1fr; gap: 10px;">
                         <!-- Will be populated by JavaScript -->
@@ -93,8 +94,8 @@
                     <h2 style="color: #dc3545;">Errors</h2>
                     <button class="btn btn-primary" onclick="clearErrors()">Clear</button>
                 </div>
-                <div id="errors-list" style="max-height: 300px; overflow-y: auto; background: #f8f8f8; padding: 10px; border-radius: 4px;">
-                    <p style="color: #666; font-style: italic;">No errors</p>
+                <div id="errors-list" style="max-height: 300px; overflow-y: auto; background: #252525; padding: 10px; border-radius: 4px; border: 1px solid #333;">
+                    <p style="color: #aaa; font-style: italic;">No errors</p>
                 </div>
             </div>
         </div>
@@ -104,18 +105,62 @@
                     <h2>Recordings</h2>
                     <button class="btn btn-primary" onclick="refreshRecordings()">Refresh</button>
                 </div>
-                <table>
+                
+                <!-- Channel Filter -->
+                <div style="margin-bottom: 20px;">
+                    <div style="position: relative; display: inline-block;">
+                        <button class="btn" onclick="toggleChannelFilter()" style="background: #252525; color: #e0e0e0; border: 1px solid #333;">
+                            Filter by Channel <span id="channel-filter-count" style="margin-left: 5px;">(All)</span> ▼
+                        </button>
+                        <div id="channel-filter-dropdown" style="display: none; position: absolute; top: 100%; left: 0; margin-top: 5px; background: #1e1e1e; border: 1px solid #333; border-radius: 4px; padding: 10px; min-width: 200px; max-height: 300px; overflow-y: auto; z-index: 1000; box-shadow: 0 4px 6px rgba(0,0,0,0.3);">
+                            <div style="margin-bottom: 10px;">
+                                <button class="btn" onclick="selectAllChannels()" style="font-size: 12px; padding: 5px 10px; background: #4a9eff; color: white; border: none;">Select All</button>
+                                <button class="btn" onclick="deselectAllChannels()" style="font-size: 12px; padding: 5px 10px; background: #6c757d; color: white; border: none; margin-left: 5px;">Deselect All</button>
+                            </div>
+                            <div id="channel-filter-checkboxes"></div>
+                        </div>
+                    </div>
+                </div>
+                
+                <table style="border-collapse: collapse;">
                     <thead>
                         <tr>
-                            <th>Datetime</th>
-                            <th>Size</th>
-                            <th>Channel</th>
-                            <th>Play</th>
-                            <th>Actions</th>
+                            <th style="padding: 6px 10px;">Channel Name</th>
+                            <th style="padding: 6px 10px;">DateTime</th>
+                            <th style="padding: 6px 10px;">Size</th>
+                            <th style="padding: 6px 10px;">Play</th>
+                            <th style="padding: 6px 10px;">Actions</th>
                         </tr>
                     </thead>
                     <tbody id="recordings-tbody"></tbody>
                 </table>
+                <style>
+                    #recordings-tbody tr {
+                        height: auto;
+                        line-height: 1.2;
+                    }
+                    #recordings-tbody td {
+                        padding: 4px 10px;
+                        vertical-align: middle;
+                    }
+                    #recordings-tbody audio {
+                        height: 32px;
+                    }
+                </style>
+                
+                <!-- Pagination -->
+                <div style="display: flex; justify-content: space-between; align-items: center; margin-top: 20px; padding-top: 20px; border-top: 1px solid #333;">
+                    <div style="color: #aaa;">
+                        Showing <span id="recordings-range-start">0</span> - <span id="recordings-range-end">0</span> of <span id="recordings-total">0</span> recordings
+                    </div>
+                    <div style="display: flex; gap: 10px;">
+                        <button class="btn" id="recordings-prev-btn" onclick="changeRecordingsPage(-1)" style="background: #252525; color: #e0e0e0; border: 1px solid #333;" disabled>Previous</button>
+                        <span style="color: #aaa; padding: 5px 15px; display: flex; align-items: center;">
+                            Page <span id="recordings-current-page">1</span> of <span id="recordings-total-pages">1</span>
+                        </span>
+                        <button class="btn" id="recordings-next-btn" onclick="changeRecordingsPage(1)" style="background: #252525; color: #e0e0e0; border: 1px solid #333;" disabled>Next</button>
+                    </div>
+                </div>
             </div>
         </div>
         <div id="page-device" class="page hidden">
@@ -223,7 +268,7 @@
                     </div>
                     
                     <!-- Common Device Fields -->
-                    <div style="border-top: 2px solid #e0e0e0; padding-top: 20px; margin-top: 20px;">
+                    <div style="border-top: 2px solid #333; padding-top: 20px; margin-top: 20px;">
                         <h3>Common Settings</h3>
                         <div class="form-group">
                             <label>Mode</label>
@@ -267,9 +312,39 @@
         <div id="page-channels" class="page hidden">
             <div class="card">
                 <h2>Channels</h2>
-                <div style="margin-bottom: 20px;">
-                    <button class="btn btn-success" onclick="showAddChannelModal()">+ Add Channel</button>
+                
+                <!-- Center Frequency Control -->
+                <div style="margin-bottom: 20px; padding: 15px; background: #252525; border-radius: 4px; border: 1px solid #333;">
+                    <div style="display: flex; align-items: center; gap: 15px; margin-bottom: 15px;">
+                        <div class="form-group" style="margin: 0; flex: 0 0 250px;">
+                            <label style="margin-bottom: 5px;">Center Frequency (MHz)</label>
+                            <input type="number" id="channels-center-freq" step="0.0001" placeholder="120.0000" style="width: 100%; padding: 8px; border: 1px solid #444; border-radius: 4px; background: #1a1a1a; color: #e0e0e0;" onchange="updateChannelFiltering()">
+                            <div style="margin-top: 8px; display: flex; gap: 15px; align-items: center;">
+                                <label style="margin: 0; font-size: 12px; color: #aaa;">Range:</label>
+                                <label style="margin: 0; display: flex; align-items: center; gap: 5px; cursor: pointer; font-size: 12px; color: #e0e0e0;">
+                                    <input type="radio" name="frequency-range" value="2.5" id="range-2.5" onchange="updateChannelFiltering()" style="margin: 0;">
+                                    <span>2.5 MHz</span>
+                                </label>
+                                <label style="margin: 0; display: flex; align-items: center; gap: 5px; cursor: pointer; font-size: 12px; color: #e0e0e0;">
+                                    <input type="radio" name="frequency-range" value="10" id="range-10" checked onchange="updateChannelFiltering()" style="margin: 0;">
+                                    <span>10 MHz</span>
+                                </label>
+                            </div>
+                        </div>
+                        <div style="flex: 1;">
+                            <label style="margin-bottom: 5px; display: block;">Frequency Band</label>
+                            <div id="frequency-band-visualization" style="height: 60px; background: #0a0a0a; border: 1px solid #333; border-radius: 4px; position: relative; overflow: hidden; width: 100%;">
+                                <canvas id="frequency-band-canvas" style="width: 100%; height: 100%; display: block;"></canvas>
+                            </div>
+                            <div style="display: flex; justify-content: space-between; margin-top: 5px; font-size: 11px; color: #aaa;">
+                                <span id="band-start-freq">--</span>
+                                <span id="band-center-freq">--</span>
+                                <span id="band-end-freq">--</span>
+                            </div>
+                        </div>
+                    </div>
                 </div>
+                
                 <table>
                     <thead>
                         <tr>
@@ -286,19 +361,44 @@
                     </thead>
                     <tbody id="channels-list-tbody"></tbody>
                 </table>
+                
+                <!-- Pagination Controls -->
+                <div id="channels-pagination" style="margin-top: 15px; display: flex; justify-content: space-between; align-items: center; padding: 10px; background: #252525; border-radius: 4px;">
+                    <div style="color: #aaa; font-size: 14px;">
+                        Showing <span id="channels-range-start">0</span> - <span id="channels-range-end">0</span> of <span id="channels-total">0</span> channels
+                    </div>
+                    <div style="display: flex; gap: 10px; align-items: center;">
+                        <button id="channels-prev-btn" class="btn btn-primary" onclick="changeChannelsPage(-1)" style="padding: 6px 12px; font-size: 12px;">Previous</button>
+                        <span style="color: #aaa; font-size: 14px;">
+                            Page <span id="channels-current-page">1</span> of <span id="channels-total-pages">1</span>
+                        </span>
+                        <button id="channels-next-btn" class="btn btn-primary" onclick="changeChannelsPage(1)" style="padding: 6px 12px; font-size: 12px;">Next</button>
+                    </div>
+                </div>
+                
+                <!-- Action Buttons at Bottom -->
+                <div style="margin-top: 20px; display: flex; gap: 10px; justify-content: flex-end; padding: 15px; background: #252525; border-radius: 4px; border: 1px solid #333;">
+                    <button class="btn btn-primary" onclick="exportChannelsToCSV()" style="background: #007bff; color: white;">Export CSV</button>
+                    <label for="channels-csv-import" class="btn btn-primary" style="background: #007bff; color: white; cursor: pointer; margin: 0;">
+                        Import CSV
+                        <input type="file" id="channels-csv-import" accept=".csv" style="display: none;" onchange="importChannelsFromCSV(event)">
+                    </label>
+                    <button class="btn btn-success" onclick="saveChannelsConfig()" style="background: #28a745; color: white;">Save Config</button>
+                    <button class="btn btn-success" onclick="showAddChannelModal()">+ Add Channel</button>
+                </div>
             </div>
         </div>
         
         <!-- Channel Add/Edit Modal -->
         <div id="channel-modal" class="modal" style="display: none; position: fixed; z-index: 1000; left: 0; top: 0; width: 100%; height: 100%; overflow: auto; background-color: rgba(0,0,0,0.4);">
-            <div class="modal-content" style="background-color: #fefefe; margin: 5% auto; padding: 20px; border: 1px solid #888; width: 90%; max-width: 800px; border-radius: 8px; max-height: 90vh; overflow-y: auto;">
+            <div class="modal-content" style="background-color: #1e1e1e; margin: 5% auto; padding: 20px; border: 1px solid #444; width: 90%; max-width: 800px; border-radius: 8px; max-height: 90vh; overflow-y: auto;">
                 <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px;">
                     <h2 id="modal-title">Add Channel</h2>
                     <span class="close" onclick="closeChannelModal()" style="color: #aaa; float: right; font-size: 28px; font-weight: bold; cursor: pointer;">&times;</span>
                 </div>
-                <form id="channel-form" onsubmit="saveChannel(event)">
+                <form id="channel-form" onsubmit="saveChannel(event); return false;" novalidate>
                     <!-- Tab Navigation -->
-                    <div style="border-bottom: 2px solid #e0e0e0; margin-bottom: 20px;">
+                    <div style="border-bottom: 2px solid #333; margin-bottom: 20px;">
                         <button type="button" class="tab-button active" onclick="showChannelTab('general')" id="tab-general-btn">General</button>
                         <button type="button" class="tab-button" onclick="showChannelTab('outputs')" id="tab-outputs-btn">Outputs</button>
                         <button type="button" class="tab-button" onclick="showChannelTab('advanced')" id="tab-advanced-btn">Advanced</button>
@@ -310,7 +410,7 @@
                         <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 15px;">
                             <div class="form-group">
                                 <label>Channel Name/Label *</label>
-                                <input type="text" id="channel-label" name="label" required placeholder="e.g., NOAA 162.400">
+                                <input type="text" id="channel-label" name="label" required placeholder="e.g., NOAA 162.400" oninput="updateChannelRecordingDirectory();">
                             </div>
                             <div class="form-group">
                                 <label>Frequency (MHz) *</label>
@@ -351,14 +451,18 @@
                         <h3>Outputs</h3>
                         
                         <!-- File Output (Recording) -->
-                        <div style="background: #f8f8f8; padding: 15px; border-radius: 4px; margin-bottom: 15px;">
+                        <div style="background: #252525; padding: 15px; border-radius: 4px; margin-bottom: 15px; border: 1px solid #333;">
                             <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px;">
                                 <label><input type="checkbox" id="output-file-enabled" name="output_file_enabled" checked onchange="toggleOutputSection('file')"> Enable File Recording</label>
                             </div>
                             <div id="output-file-section" style="display: none;">
                                 <div class="form-group">
                                     <label>Directory *</label>
-                                    <input type="text" id="output-file-directory" name="output_file_directory" placeholder="recordings">
+                                    <div style="display: flex; align-items: center; gap: 10px;">
+                                        <input type="text" id="output-file-directory" name="output_file_directory" placeholder="recordings" readonly style="background: #1a1a1a; color: #888; cursor: not-allowed; flex: 1;">
+                                        <span id="output-file-directory-label" style="color: #aaa; font-size: 12px;"></span>
+                                    </div>
+                                    <small>Directory is automatically set to: <span id="output-file-directory-preview" style="color: #4a9eff;"></span></small>
                                 </div>
                                 <div class="form-group">
                                     <label>Filename Template *</label>
@@ -372,11 +476,23 @@
                                     <label><input type="checkbox" id="output-file-split" name="output_file_split"> Split on Transmission</label>
                                     <small>Create new file when squelch opens</small>
                                 </div>
+                                <div class="form-group">
+                                    <label><input type="checkbox" id="output-file-include-freq" name="output_file_include_freq"> Include Frequency in Filename</label>
+                                    <small>Include frequency (in MHz) in the filename</small>
+                                </div>
+                                <div class="form-group">
+                                    <label><input type="checkbox" id="output-file-append" name="output_file_append" checked> Append to Existing File</label>
+                                    <small>Append to existing file instead of creating new files (default: true)</small>
+                                </div>
+                                <div class="form-group">
+                                    <label><input type="checkbox" id="output-file-dated-subdirs" name="output_file_dated_subdirs"> Dated Subdirectories</label>
+                                    <small>Create date-based subdirectories (YYYY-MM-DD)</small>
+                                </div>
                             </div>
                         </div>
                         
                         <!-- UDP Stream Output -->
-                        <div style="background: #f8f8f8; padding: 15px; border-radius: 4px; margin-bottom: 15px;">
+                        <div style="background: #252525; padding: 15px; border-radius: 4px; margin-bottom: 15px; border: 1px solid #333;">
                             <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px;">
                                 <label><input type="checkbox" id="output-udp-enabled" name="output_udp_enabled" onchange="toggleOutputSection('udp')"> Enable UDP Streaming</label>
                             </div>
@@ -405,35 +521,66 @@
                         </div>
                         
                         <!-- Icecast Output -->
-                        <div style="background: #f8f8f8; padding: 15px; border-radius: 4px; margin-bottom: 15px;">
+                        <div id="output-icecast-container" style="background: #252525; padding: 15px; border-radius: 4px; margin-bottom: 15px; border: 1px solid #333; display: none;">
                             <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px;">
                                 <label><input type="checkbox" id="output-icecast-enabled" name="output_icecast_enabled" onchange="toggleOutputSection('icecast')"> Enable Icecast Streaming</label>
                             </div>
                             <div id="output-icecast-section" style="display: none;">
                                 <div class="form-group">
-                                    <label>Server *</label>
-                                    <input type="text" id="output-icecast-server" name="output_icecast_server" placeholder="icecast.example.com">
-                                </div>
-                                <div class="form-group">
-                                    <label>Port *</label>
-                                    <input type="number" id="output-icecast-port" name="output_icecast_port" placeholder="8000">
-                                </div>
-                                <div class="form-group">
-                                    <label>Mountpoint *</label>
-                                    <input type="text" id="output-icecast-mountpoint" name="output_icecast_mountpoint" placeholder="/stream.mp3">
-                                </div>
-                                <div class="form-group">
-                                    <label>Username *</label>
-                                    <input type="text" id="output-icecast-username" name="output_icecast_username" placeholder="source">
-                                </div>
-                                <div class="form-group">
-                                    <label>Password *</label>
-                                    <input type="password" id="output-icecast-password" name="output_icecast_password" placeholder="password" autocomplete="current-password">
-                                </div>
-                                <div class="form-group">
-                                    <label>Stream Name</label>
+                                    <label>Stream Name *</label>
                                     <input type="text" id="output-icecast-name" name="output_icecast_name" placeholder="Channel Name">
+                                    <small>Stream name for this channel. Server settings are configured in Output Settings.</small>
                                 </div>
+                            </div>
+                        </div>
+                        
+                        <!-- Boondock API Output -->
+                        <div id="output-boondock-api-container" style="background: #252525; padding: 15px; border-radius: 4px; margin-bottom: 15px; border: 1px solid #333; display: none;">
+                            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px;">
+                                <label><input type="checkbox" id="output-boondock-api-enabled" name="output_boondock_api_enabled" onchange="toggleOutputSection('boondock-api')"> Enable Boondock API Upload</label>
+                            </div>
+                            <div id="output-boondock-api-section" style="display: none;">
+                                <div class="form-group">
+                                    <label>API Server URL</label>
+                                    <input type="text" id="output-boondock-api-url" name="output_boondock_api_url" placeholder="https://api.boondockecho.com">
+                                    <small>Uses default from Output Settings if not specified</small>
+                                </div>
+                                <div class="form-group">
+                                    <label>API Key</label>
+                                    <input type="password" id="output-boondock-api-key" name="output_boondock_api_key" placeholder="API Key">
+                                    <small>Uses default from Output Settings if not specified</small>
+                                </div>
+                                <small style="color: #aaa; font-style: italic;">Note: Boondock API implementation details to be defined later.</small>
+                            </div>
+                        </div>
+                        
+                        <!-- Redis Stream Output -->
+                        <div id="output-redis-container" style="background: #252525; padding: 15px; border-radius: 4px; margin-bottom: 15px; border: 1px solid #333; display: none;">
+                            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px;">
+                                <label><input type="checkbox" id="output-redis-enabled" name="output_redis_enabled" onchange="toggleOutputSection('redis')"> Enable Redis Streaming</label>
+                            </div>
+                            <div id="output-redis-section" style="display: none;">
+                                <div class="form-group">
+                                    <label>Redis Server Address</label>
+                                    <input type="text" id="output-redis-address" name="output_redis_address" placeholder="127.0.0.1">
+                                    <small>Uses default from Output Settings if not specified</small>
+                                </div>
+                                <div class="form-group">
+                                    <label>Redis Port</label>
+                                    <input type="number" id="output-redis-port" name="output_redis_port" placeholder="6379">
+                                    <small>Uses default from Output Settings if not specified</small>
+                                </div>
+                                <div class="form-group">
+                                    <label>Redis Password</label>
+                                    <input type="password" id="output-redis-password" name="output_redis_password" placeholder="(optional)">
+                                    <small>Uses default from Output Settings if not specified</small>
+                                </div>
+                                <div class="form-group">
+                                    <label>Redis Database</label>
+                                    <input type="number" id="output-redis-database" name="output_redis_database" placeholder="0">
+                                    <small>Uses default from Output Settings if not specified</small>
+                                </div>
+                                <small style="color: #aaa; font-style: italic;">Note: Redis streaming implementation details to be defined later.</small>
                             </div>
                         </div>
                     </div>
@@ -482,7 +629,7 @@
                     
                     <div style="margin-top: 20px; display: flex; gap: 10px; justify-content: flex-end;">
                         <button type="button" class="btn" onclick="closeChannelModal()" style="background: #6c757d; color: white;">Cancel</button>
-                        <button type="submit" class="btn btn-success">Save Channel</button>
+                        <button type="submit" class="btn btn-success" onclick="if(event) event.stopPropagation();">Save Channel</button>
                     </div>
                     <input type="hidden" id="channel-device-index" name="device_index" value="0">
                     <input type="hidden" id="channel-index" name="channel_index" value="">
@@ -493,35 +640,156 @@
         <div id="page-outputs" class="page hidden">
             <div class="card">
                 <h2>Output Settings</h2>
+                <p style="color: #aaa; margin-bottom: 20px;">Configure global output methods. Only enabled methods will be available in channel output settings.</p>
                 <form id="output-form" onchange="markChange('outputs')">
-                    <div style="border-bottom: 2px solid #e0e0e0; padding-bottom: 20px; margin-bottom: 20px;">
-                        <h3>File Recording Chunking</h3>
+                    <!-- 1. File Recording -->
+                    <div style="border-bottom: 2px solid #333; padding-bottom: 20px; margin-bottom: 20px;">
+                        <h3>1. File Recording</h3>
                         <div class="form-group">
-                            <label>Audio File Chunk Duration: <span id="chunk-duration-value">60</span> minutes</label>
-                            <input type="range" id="file-chunk-duration" name="file_chunk_duration_minutes" 
-                                   min="5" max="60" step="5" value="60" 
-                                   oninput="document.getElementById('chunk-duration-value').textContent = this.value; markChange('outputs');"
-                                   style="width: 100%; margin-top: 10px;">
-                            <small>Controls how long each audio file chunk will be before creating a new file. Range: 5-60 minutes in 5-minute increments. Default: 60 minutes. This setting applies globally to all channels.</small>
+                            <label><input type="checkbox" id="output-method-file-enabled" checked onchange="toggleOutputMethod('file')"> Enable File Recording</label>
+                            <small>Allow channels to record audio to files. When enabled, this option will appear in channel output settings.</small>
+                        </div>
+                        <div id="output-method-file-section" style="display: block; margin-top: 15px; padding: 15px; background: #252525; border-radius: 4px; border: 1px solid #333;">
+                            <div class="form-group">
+                                <label>Global Recording Directory *</label>
+                                <input type="text" id="output-settings-global-recording-dir" name="global_recording_directory" placeholder="recordings" value="recordings" oninput="updateChannelRecordingDirectory();">
+                                <small>Base directory for all channel recordings. Each channel will create a subdirectory with its name.</small>
+                            </div>
+                            <div class="form-group">
+                                <label>Audio File Chunk Duration: <span id="chunk-duration-value">60</span> minutes</label>
+                                <input type="range" id="file-chunk-duration" name="file_chunk_duration_minutes" 
+                                       min="5" max="60" step="5" value="60" 
+                                       oninput="document.getElementById('chunk-duration-value').textContent = this.value; markChange('outputs');"
+                                       style="width: 100%; margin-top: 10px;">
+                                <small>Controls how long each audio file chunk will be before creating a new file. Range: 5-60 minutes in 5-minute increments. Default: 60 minutes. This setting applies globally to all channels.</small>
+                            </div>
                         </div>
                     </div>
-                    <div style="border-top: 2px solid #e0e0e0; padding-top: 20px;">
-                        <h3>File Output (Legacy)</h3>
+
+                    <!-- 2. UDP Stream -->
+                    <div style="border-bottom: 2px solid #333; padding-bottom: 20px; margin-bottom: 20px;">
+                        <h3>2. UDP Stream</h3>
                         <div class="form-group">
-                            <label><input type="checkbox" id="file-output-enabled"> Enable File Output</label>
+                            <label><input type="checkbox" id="output-method-udp-enabled" onchange="toggleOutputMethod('udp')"> Enable UDP Streaming</label>
+                            <small>Allow channels to stream audio via UDP. When enabled, this option will appear in channel output settings.</small>
                         </div>
-                        <div class="form-group">
-                            <label>Directory: *</label>
-                            <input type="text" id="output-directory" name="directory" placeholder="recordings/">
-                            <small>Directory where audio files will be stored. Must exist. Default: recordings/ (relative to current directory).</small>
-                        </div>
-                        <div class="form-group">
-                            <label>Filename Template: *</label>
-                            <input type="text" id="output-filename" name="filename_template" placeholder="Channel">
-                            <small>File name prefix. Date and time will be appended automatically.</small>
+                        <div id="output-method-udp-section" style="display: none; margin-top: 15px; padding: 15px; background: #252525; border-radius: 4px; border: 1px solid #333;">
+                            <div class="form-group">
+                                <label>Default UDP Server Address *</label>
+                                <input type="text" id="output-settings-udp-default-address" name="udp_default_address" placeholder="127.0.0.1">
+                                <small>Default UDP server address for all channels. Can be overridden per channel.</small>
+                            </div>
+                            <div class="form-group">
+                                <label><input type="checkbox" id="output-method-udp-server-enabled" onchange="toggleUdpServerPorts()"> Enable UDP Server Mode</label>
+                                <small>Allow channels to act as UDP servers. When enabled, channels will automatically assign ports from the range below.</small>
+                            </div>
+                            <div id="output-method-udp-server-section" style="display: none; margin-top: 15px; padding: 15px; background: #1a1a1a; border-radius: 4px; border: 1px solid #444;">
+                                <div class="form-group">
+                                    <label>Starting Port *</label>
+                                    <input type="number" id="output-udp-port-start" name="udp_port_start" placeholder="6001" min="1024" max="65535">
+                                    <small>Starting port number for UDP server port range.</small>
+                                </div>
+                                <div class="form-group">
+                                    <label>Ending Port *</label>
+                                    <input type="number" id="output-udp-port-end" name="udp_port_end" placeholder="6100" min="1024" max="65535">
+                                    <small>Ending port number for UDP server port range. Channels will be assigned ports from this range.</small>
+                                </div>
+                            </div>
                         </div>
                     </div>
-                    <button type="button" class="btn btn-success" onclick="saveOutputSettings()">Save Output Settings</button>
+
+                    <!-- 3. Boondock API -->
+                    <div style="border-bottom: 2px solid #333; padding-bottom: 20px; margin-bottom: 20px;">
+                        <h3>3. Boondock API</h3>
+                        <div class="form-group">
+                            <label><input type="checkbox" id="output-method-boondock-api-enabled" onchange="toggleOutputMethod('boondock-api')"> Enable Boondock API</label>
+                            <small>Allow channels to upload audio files asynchronously to Boondock API server. When enabled, this option will appear in channel output settings.</small>
+                        </div>
+                        <div id="output-method-boondock-api-section" style="display: none; margin-top: 15px; padding: 15px; background: #252525; border-radius: 4px; border: 1px solid #333;">
+                            <div class="form-group">
+                                <label>API Server URL</label>
+                                <input type="text" id="output-settings-boondock-api-url" name="boondock_api_url" placeholder="https://api.boondockecho.com">
+                                <small>Boondock API server endpoint (to be implemented).</small>
+                            </div>
+                            <div class="form-group">
+                                <label>API Key</label>
+                                <input type="password" id="output-settings-boondock-api-key" name="boondock_api_key" placeholder="API Key">
+                                <small>Authentication key for Boondock API (to be implemented).</small>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- 4. Stream to Redis -->
+                    <div style="border-bottom: 2px solid #333; padding-bottom: 20px; margin-bottom: 20px;">
+                        <h3>4. Stream to Redis</h3>
+                        <div class="form-group">
+                            <label><input type="checkbox" id="output-method-redis-enabled" onchange="toggleOutputMethod('redis')"> Enable Redis Streaming</label>
+                            <small>Allow channels to stream audio packets to Redis server. When enabled, this option will appear in channel output settings.</small>
+                        </div>
+                        <div id="output-method-redis-section" style="display: none; margin-top: 15px; padding: 15px; background: #252525; border-radius: 4px; border: 1px solid #333;">
+                            <div class="form-group">
+                                <label>Redis Server Address *</label>
+                                <input type="text" id="output-settings-redis-address" name="redis_address" placeholder="127.0.0.1">
+                                <small>Redis server hostname or IP address.</small>
+                            </div>
+                            <div class="form-group">
+                                <label>Redis Port *</label>
+                                <input type="number" id="output-settings-redis-port" name="redis_port" placeholder="6379" min="1" max="65535">
+                                <small>Redis server port (default: 6379).</small>
+                            </div>
+                            <div class="form-group">
+                                <label>Redis Password</label>
+                                <input type="password" id="output-settings-redis-password" name="redis_password" placeholder="(optional)">
+                                <small>Redis authentication password (optional).</small>
+                            </div>
+                            <div class="form-group">
+                                <label>Redis Database</label>
+                                <input type="number" id="output-settings-redis-database" name="redis_database" placeholder="0" min="0" max="15">
+                                <small>Redis database number (default: 0).</small>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- 5. Icecast Streaming -->
+                    <div style="border-bottom: 2px solid #333; padding-bottom: 20px; margin-bottom: 20px;">
+                        <h3>5. Icecast Streaming</h3>
+                        <div class="form-group">
+                            <label><input type="checkbox" id="output-method-icecast-enabled" onchange="toggleOutputMethod('icecast')"> Enable Icecast Streaming</label>
+                            <small>Allow channels to stream audio to Icecast server. When enabled, this option will appear in channel output settings.</small>
+                        </div>
+                        <div id="output-method-icecast-section" style="display: none; margin-top: 15px; padding: 15px; background: #252525; border-radius: 4px; border: 1px solid #333;">
+                            <div class="form-group">
+                                <label>Icecast Server *</label>
+                                <input type="text" id="output-settings-icecast-server" name="icecast_server" placeholder="icecast.example.com">
+                                <small>Icecast server hostname or IP address.</small>
+                            </div>
+                            <div class="form-group">
+                                <label>Icecast Port *</label>
+                                <input type="number" id="output-settings-icecast-port" name="icecast_port" placeholder="8000" min="1" max="65535">
+                                <small>Icecast server port (default: 8000).</small>
+                            </div>
+                            <div class="form-group">
+                                <label>Mountpoint *</label>
+                                <input type="text" id="output-settings-icecast-mountpoint" name="icecast_mountpoint" placeholder="/stream.mp3">
+                                <small>Icecast mountpoint path.</small>
+                            </div>
+                            <div class="form-group">
+                                <label>Username *</label>
+                                <input type="text" id="output-settings-icecast-username" name="icecast_username" placeholder="source">
+                                <small>Icecast source username.</small>
+                            </div>
+                            <div class="form-group">
+                                <label>Password *</label>
+                                <input type="password" id="output-settings-icecast-password" name="icecast_password" placeholder="password" autocomplete="current-password">
+                                <small>Icecast source password.</small>
+                            </div>
+                            <small style="color: #aaa; font-style: italic;">Note: Stream name can be configured per channel in channel output settings.</small>
+                        </div>
+                    </div>
+
+                    <div style="margin-top: 20px; display: flex; gap: 10px; justify-content: flex-end;">
+                        <button type="button" class="btn btn-success" onclick="saveOutputSettings()">Save Output Settings</button>
+                    </div>
                 </form>
             </div>
         </div>
@@ -542,11 +810,11 @@
                 </div>
                 
                 <!-- Bottom Controls Section -->
-                <div style="margin-top: 0; padding: 20px; display: flex; gap: 20px; align-items: flex-start; background: white;">
-                    <!-- Device Selection -->
-                    <div style="flex: 0 0 250px;">
+                <div style="margin-top: 0; padding: 20px; display: flex; gap: 20px; align-items: flex-start; background: #000;">
+                    <!-- Device Selection (Hidden - always uses first device) -->
+                    <div style="display: none;">
                         <label for="spectrum-device-select" style="display: block; margin-bottom: 5px; font-weight: 500;">Device:</label>
-                        <select id="spectrum-device-select" style="width: 100%; padding: 5px 10px; border: 1px solid #ddd; border-radius: 4px;">
+                        <select id="spectrum-device-select" style="width: 100%; padding: 5px 10px; border: 1px solid #444; border-radius: 4px; background: #252525; color: #e0e0e0;">
                             <option value="">Loading...</option>
                         </select>
                         <label style="display: block; margin-top: 10px; font-weight: 500;">
@@ -556,61 +824,61 @@
                     
                     <!-- Display Controls (Collapsible) -->
                     <div style="flex: 1;">
-                        <div style="background: #f8f8f8; padding: 15px; border-radius: 4px;">
-                            <h3 style="margin: 0 0 15px 0; font-size: 16px; cursor: pointer; user-select: none;" onclick="toggleDisplayControls()">
-                                Display Controls <span id="display-controls-arrow">▼</span>
-                            </h3>
+                        <div style="background: #1a1a1a; padding: 15px; border-radius: 4px; border: 1px solid #333;">
+                            <div style="margin: 0 0 15px 0; font-size: 16px; cursor: pointer; user-select: none; text-align: right; color: #fff;" onclick="toggleDisplayControls()">
+                                <span id="display-controls-arrow">▼</span>
+                            </div>
                             <div id="display-controls-content" style="display: none;">
                                 <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 15px;">
                                     <div>
-                                        <label for="spectrum-gain" style="display: block; margin-bottom: 5px; font-size: 13px;">
+                                        <label for="spectrum-gain" style="display: block; margin-bottom: 5px; font-size: 13px; color: #fff;">
                                             Gain/Intensity: <span id="spectrum-gain-value">-40</span> dB
                                         </label>
-                                        <input type="range" id="spectrum-gain" min="-40" max="40" value="-40" step="1" 
+                                        <input type="range" id="spectrum-gain" class="spectrum-slider" min="-40" max="40" value="-40" step="1" 
                                                style="width: 100%;" oninput="updateSpectrumGain(this.value)">
                                     </div>
                                     <div>
-                                        <label for="spectrum-vertical-scale" style="display: block; margin-bottom: 5px; font-size: 13px;">
+                                        <label for="spectrum-vertical-scale" style="display: block; margin-bottom: 5px; font-size: 13px; color: #fff;">
                                             Vertical Scale: <span id="spectrum-vertical-scale-value">70</span> dB
                                         </label>
-                                        <input type="range" id="spectrum-vertical-scale" min="40" max="200" value="70" step="10" 
+                                        <input type="range" id="spectrum-vertical-scale" class="spectrum-slider" min="40" max="200" value="70" step="10" 
                                                style="width: 100%;" oninput="updateSpectrumVerticalScale(this.value)">
                                     </div>
                                     <div>
-                                        <label for="spectrum-vertical-offset" style="display: block; margin-bottom: 5px; font-size: 13px;">
+                                        <label for="spectrum-vertical-offset" style="display: block; margin-bottom: 5px; font-size: 13px; color: #fff;">
                                             Vertical Offset: <span id="spectrum-vertical-offset-value">35</span> dB
                                         </label>
-                                        <input type="range" id="spectrum-vertical-offset" min="-60" max="60" value="35" step="5" 
+                                        <input type="range" id="spectrum-vertical-offset" class="spectrum-slider" min="-60" max="60" value="35" step="5" 
                                                style="width: 100%;" oninput="updateSpectrumVerticalOffset(this.value)">
                                     </div>
                                     <div>
-                                        <label for="spectrum-averaging" style="display: block; margin-bottom: 5px; font-size: 13px;">
+                                        <label for="spectrum-averaging" style="display: block; margin-bottom: 5px; font-size: 13px; color: #fff;">
                                             Averaging: <span id="spectrum-averaging-value">10</span>
                                         </label>
-                                        <input type="range" id="spectrum-averaging" min="1" max="64" value="10" step="1" 
+                                        <input type="range" id="spectrum-averaging" class="spectrum-slider" min="1" max="64" value="10" step="1" 
                                                style="width: 100%;" oninput="updateSpectrumAveraging(this.value)">
                                     </div>
                                     <div>
-                                        <label for="waterfall-intensity" style="display: block; margin-bottom: 5px; font-size: 13px;">
+                                        <label for="waterfall-intensity" style="display: block; margin-bottom: 5px; font-size: 13px; color: #fff;">
                                             Waterfall Sensitivity: <span id="waterfall-intensity-value">50</span>%
                                         </label>
-                                        <input type="range" id="waterfall-intensity" min="10" max="100" value="50" step="5" 
+                                        <input type="range" id="waterfall-intensity" class="spectrum-slider" min="10" max="100" value="50" step="5" 
                                                style="width: 100%;" oninput="updateWaterfallIntensity(this.value)">
-                                        <small style="display: block; margin-top: 3px; font-size: 11px; color: #666;">
+                                        <small style="display: block; margin-top: 3px; font-size: 11px; color: #aaa;">
                                             Lower = only strong signals, Higher = weak signals visible
                                         </small>
                                     </div>
                                     <div>
-                                        <label for="waterfall-speed" style="display: block; margin-bottom: 5px; font-size: 13px;">
+                                        <label for="waterfall-speed" style="display: block; margin-bottom: 5px; font-size: 13px; color: #fff;">
                                             Waterfall Speed: <span id="waterfall-speed-value">1</span>x
                                         </label>
-                                        <input type="range" id="waterfall-speed" min="1" max="10" value="1" step="1" 
+                                        <input type="range" id="waterfall-speed" class="spectrum-slider" min="1" max="10" value="1" step="1" 
                                                style="width: 100%;" oninput="updateWaterfallSpeed(this.value)">
                                     </div>
                                 </div>
                                 <div style="margin-top: 15px; display: flex; gap: 10px;">
-                                    <button class="btn btn-primary" onclick="resetSpectrumControls()" style="font-size: 12px; padding: 5px 15px;">Reset to Defaults</button>
-                                    <button class="btn btn-primary" onclick="clearWaterfall()" style="font-size: 12px; padding: 5px 15px;">Clear Waterfall</button>
+                                    <button class="btn btn-primary spectrum-btn" onclick="resetSpectrumControls()" style="font-size: 12px; padding: 5px 15px;">Reset to Defaults</button>
+                                    <button class="btn btn-primary spectrum-btn" onclick="clearWaterfall()" style="font-size: 12px; padding: 5px 15px;">Clear Waterfall</button>
                                 </div>
                             </div>
                         </div>
@@ -630,12 +898,12 @@
                     <button class="btn btn-primary" onclick="loadConfigInfo()">Load Current Path</button>
                     <button class="btn btn-success" onclick="saveConfigPath()" style="margin-left: 10px;">Save Path</button>
                 </div>
-                <div style="border-top: 1px solid #e0e0e0; padding-top: 20px; margin-top: 20px;">
+                <div style="border-top: 1px solid #333; padding-top: 20px; margin-top: 20px;">
                     <h3>Download Configuration</h3>
                     <p>Download the current configuration file to your computer.</p>
                     <button class="btn btn-primary" onclick="downloadConfig()">Download Config</button>
                 </div>
-                <div style="border-top: 1px solid #e0e0e0; padding-top: 20px; margin-top: 20px;">
+                <div style="border-top: 1px solid #333; padding-top: 20px; margin-top: 20px;">
                     <h3>Upload Configuration</h3>
                     <p>Upload a new configuration file to replace the current one.</p>
                     <input type="file" id="config-upload" accept=".conf,.txt" style="margin-bottom: 10px;" onchange="markChange('config')">
@@ -646,9 +914,27 @@
             </div>
         </div>
     </div>
-    <div class="footer" style="background: white; padding: 20px; margin-top: 40px; border-top: 1px solid #e0e0e0; text-align: center; color: #666;">
-        <p>Copyright &copy; Boondock Technologies 2026 | <a href="https://www.boondockecho.com" target="_blank" style="color: #0066cc; text-decoration: none;">www.boondockecho.com</a></p>
     </div>
+    <div class="footer" style="background: #1e1e1e; padding: 20px; margin-top: 40px; border-top: 1px solid #333; text-align: center; color: #aaa;">
+        <p>Copyright &copy; Boondock Technologies 2026 | <a href="https://www.boondockecho.com" target="_blank" style="color: #4a9eff; text-decoration: none;">www.boondockecho.com</a></p>
+    </div>
+    
+    <!-- Custom Modal for Alerts and Confirmations -->
+    <div id="custom-modal" class="custom-modal" style="display: none;">
+        <div class="custom-modal-content">
+            <div class="custom-modal-header">
+                <h3 id="custom-modal-title">Alert</h3>
+                <span class="custom-modal-close" onclick="closeCustomModal()">&times;</span>
+            </div>
+            <div class="custom-modal-body">
+                <p id="custom-modal-message"></p>
+            </div>
+            <div class="custom-modal-footer" id="custom-modal-footer">
+                <button class="btn btn-primary" id="custom-modal-ok-btn" onclick="closeCustomModal()">OK</button>
+            </div>
+        </div>
+    </div>
+    
     <script src="/web_ui.js"></script>
     <script src="/web_spectrum.js"></script>
 </body>
