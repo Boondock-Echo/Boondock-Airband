@@ -343,6 +343,7 @@ static int parse_anynum2int(libconfig::Setting& f) {
 static int parse_channels(libconfig::Setting& chans, device_t* dev, int i) {
     int jj = 0;
     for (int j = 0; j < chans.getLength(); j++) {
+        // Skip channels marked as disabled (they remain in config file but are not processed)
         if (chans[j].exists("disable") && (bool)chans[j]["disable"] == true) {
             continue;
         }

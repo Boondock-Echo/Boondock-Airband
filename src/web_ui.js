@@ -109,6 +109,10 @@ function markChange(type) {
     // This function is kept for compatibility but does nothing
 }
 
+function updateApplyButton() {
+    // No-op: apply button removed; keep stub for legacy calls
+}
+
 function clearChanges() {
     // No-op: Changes are now applied automatically when starting capture
     // This function is kept for compatibility but does nothing
@@ -1270,7 +1274,7 @@ function importChannelsFromCSV(event) {
                         label: ch.label,
                         freq: ch.freq,
                         modulation: ch.modulation,
-                        enabled: ch.enabled,
+                        enabled: ch.enabled !== undefined ? ch.enabled : true,
                         bandwidth: ch.bandwidth || null,
                         highpass: ch.highpass || null,
                         lowpass: ch.lowpass || null,
@@ -1281,40 +1285,50 @@ function importChannelsFromCSV(event) {
                         notch: ch.notch || null,
                         notch_q: ch.notch_q || null,
                         ctcss: ch.ctcss || null,
-                        outputs: ch.outputs
+                        outputs: ch.outputs || []
                     };
                     
-                    fetch("/api/channels", {
-                        method: "POST",
-                        headers: { "Content-Type": "application/json" },
-                        body: JSON.stringify(channelPayload)
-                    })
-                    .then(function(r) { 
-                        if (!r.ok) {
-                            return r.text().then(function(text) {
-                                throw new Error("HTTP " + r.status + ": " + text);
-                            });
-                        }
-                        return r.json(); 
-                    })
-                    .then(function(data) {
-                        if (data.status === "success") {
-                            addedCount++;
-                        } else {
+                    // Add a small delay between requests to avoid overwhelming the server
+                    setTimeout(function() {
+                        fetch("/api/channels", {
+                            method: "POST",
+                            headers: { "Content-Type": "application/json" },
+                            body: JSON.stringify(channelPayload)
+                        })
+                        .then(function(r) { 
+                            if (!r.ok) {
+                                return r.text().then(function(text) {
+                                    var errorText = text;
+                                    try {
+                                        var errorJson = JSON.parse(text);
+                                        errorText = errorJson.message || errorJson.error || text;
+                                    } catch(e) {
+                                        // Not JSON, use text as-is
+                                    }
+                                    throw new Error("HTTP " + r.status + ": " + errorText);
+                                });
+                            }
+                            return r.json(); 
+                        })
+                        .then(function(data) {
+                            if (data.status === "success") {
+                                addedCount++;
+                            } else {
+                                errorCount++;
+                                var errorMsg = ch.label + " (" + ch.freq + " MHz): " + (data.error || data.message || "Unknown error");
+                                errorMessages.push(errorMsg);
+                                console.error("Error adding channel:", errorMsg);
+                            }
+                            addNextChannel(index + 1);
+                        })
+                        .catch(function(err) {
                             errorCount++;
-                            var errorMsg = ch.label + " (" + ch.freq + " MHz): " + (data.error || data.message || "Unknown error");
+                            var errorMsg = ch.label + " (" + ch.freq + " MHz): " + err.message;
                             errorMessages.push(errorMsg);
-                            console.error("Error adding channel:", errorMsg);
-                        }
-                        addNextChannel(index + 1);
-                    })
-                    .catch(function(err) {
-                        errorCount++;
-                        var errorMsg = ch.label + " (" + ch.freq + " MHz): " + err.message;
-                        errorMessages.push(errorMsg);
-                        console.error("Error adding channel:", err);
-                        addNextChannel(index + 1);
-                    });
+                            console.error("Error adding channel:", err);
+                            addNextChannel(index + 1);
+                        });
+                    }, index * 100); // 100ms delay between requests
                 };
                 
                 addNextChannel(0);
@@ -1513,6 +1527,14 @@ function saveChannelsConfig() {
                 ch.enabled = isChecked && isInRange;
             });
         }
+    });
+    
+    // Attach enabled channel list so backend can apply disable flags reliably
+    updatedData.enabled_channels = enabledChannels.map(function(entry) {
+        return {
+            device: entry.device,
+            channel_index: entry.channel.channel_index
+        };
     });
     
     // Send updated config to server

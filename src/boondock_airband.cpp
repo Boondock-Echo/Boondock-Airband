@@ -87,6 +87,8 @@ char* stats_filepath = NULL;
 size_t fft_size_log = DEFAULT_FFT_SIZE_LOG;
 size_t fft_size = 1 << fft_size_log;
 int file_chunk_duration_minutes = 60;  // Default: 60 minutes
+static int restart_argc = 0;
+static char** restart_argv = NULL;
 
 #ifdef NFM
 float alpha = exp(-1.0f / (WAVE_RATE * 2e-4));
@@ -844,6 +846,9 @@ int main(int argc, char* argv[]) {
     ProfilerStart("boondock_airband.prof");
 #endif /* WITH_PROFILING */
 
+    restart_argc = argc;
+    restart_argv = argv;
+
 #pragma GCC diagnostic ignored "-Wwrite-strings"
     char* cfgfile = CFGFILE;
     char* pidfile = PIDFILE;
@@ -1395,5 +1400,11 @@ int main(int argc, char* argv[]) {
 #ifdef WITH_PROFILING
     ProfilerStop();
 #endif /* WITH_PROFILING */
+
+    if (do_reload && restart_argv && restart_argv[0]) {
+        log(LOG_INFO, "Restarting to apply updated configuration\n");
+        execv(restart_argv[0], restart_argv);
+        log(LOG_ERR, "Failed to restart: %s\n", strerror(errno));
+    }
     return 0;
 }

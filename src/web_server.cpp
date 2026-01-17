@@ -26,6 +26,7 @@
 #include <cstdio>
 #include <cstring>
 #include <ctime>
+#include <cctype>
 #include <dirent.h>
 #include <fcntl.h>
 #include <iomanip>
@@ -601,59 +602,94 @@ static string get_config_info_json() {
     return json.str();
 }
 
-// Get full channel details from config file
-// Get channels.json file path (same directory as config file)
-static string get_channels_json_path() {
-    const char* config_path = web_server_get_config_path();
-    if (!config_path || strlen(config_path) == 0) {
-        return "channels.json";
+// Convert a config frequency value to MHz (handles Hz ints and MHz floats/strings)
+static double setting_to_mhz(const Setting& setting) {
+    double value = 0.0;
+    if (setting.getType() == Setting::TypeInt) {
+        value = (double)(int)setting;
+    } else if (setting.getType() == Setting::TypeFloat) {
+        value = (double)setting;
+    } else if (setting.getType() == Setting::TypeString) {
+        value = atof((const char*)setting);
+    } else {
+        return 0.0;
     }
-    
-    string config_str = config_path;
-    size_t last_slash = config_str.find_last_of("/");
-    if (last_slash != string::npos) {
-        return config_str.substr(0, last_slash + 1) + "channels.json";
+    if (value > 10000.0) {
+        value /= 1000000.0;
     }
-    return "channels.json";
+    return value;
 }
 
-// Read channels from channels.json file
-static bool read_channels_json(string& json_content) {
-    string json_path = get_channels_json_path();
-    ifstream file(json_path);
-    if (!file.is_open()) {
-        // File doesn't exist yet - return empty JSON structure
-        json_content = "{\"devices\":[]}";
-        return true;
-    }
-    
-    string line;
-    json_content.clear();
-    while (getline(file, line)) {
-        json_content += line + "\n";
-    }
-    file.close();
-    
-    if (json_content.empty()) {
-        json_content = "{\"devices\":[]}";
-    }
-    return true;
-}
-
-// Write channels to channels.json file
-static bool write_channels_json(const string& json_content) {
-    string json_path = get_channels_json_path();
-    ofstream file(json_path);
-    if (!file.is_open()) {
-        log(LOG_ERR, "Cannot open channels.json for writing: %s\n", json_path.c_str());
+static bool find_next_object(const string& text, size_t start, size_t& obj_start, size_t& obj_end) {
+    obj_start = text.find('{', start);
+    if (obj_start == string::npos) {
         return false;
     }
-    
-    file << json_content;
-    file.close();
-    return true;
+    int depth = 0;
+    bool in_string = false;
+    for (size_t i = obj_start; i < text.size(); i++) {
+        char c = text[i];
+        if (in_string) {
+            if (c == '\\' && i + 1 < text.size()) {
+                i++;
+                continue;
+            }
+            if (c == '"') {
+                in_string = false;
+            }
+            continue;
+        }
+        if (c == '"') {
+            in_string = true;
+            continue;
+        }
+        if (c == '{') {
+            depth++;
+        } else if (c == '}') {
+            depth--;
+            if (depth == 0) {
+                obj_end = i;
+                return true;
+            }
+        }
+    }
+    return false;
 }
 
+static bool parse_bool_at(const string& text, size_t key_pos, bool& value) {
+    size_t colon_pos = text.find(':', key_pos);
+    if (colon_pos == string::npos) {
+        return false;
+    }
+    size_t pos = colon_pos + 1;
+    while (pos < text.size() && isspace(static_cast<unsigned char>(text[pos]))) {
+        pos++;
+    }
+    if (text.compare(pos, 4, "true") == 0 || text.compare(pos, 1, "1") == 0) {
+        value = true;
+        return true;
+    }
+    if (text.compare(pos, 5, "false") == 0 || text.compare(pos, 1, "0") == 0) {
+        value = false;
+        return true;
+    }
+    return false;
+}
+
+static bool parse_channel_enabled_from_object(const string& channel_obj, bool& enabled) {
+    size_t outputs_pos = channel_obj.find("\"outputs\"");
+    size_t search_end = (outputs_pos == string::npos) ? channel_obj.size() : outputs_pos;
+    size_t enabled_pos = channel_obj.find("\"enabled\"");
+    while (enabled_pos != string::npos && enabled_pos >= search_end) {
+        enabled_pos = channel_obj.find("\"enabled\"", enabled_pos + 1);
+    }
+    if (enabled_pos == string::npos || enabled_pos >= search_end) {
+        return false;
+    }
+    return parse_bool_at(channel_obj, enabled_pos, enabled);
+}
+
+// Get full channel details from config file
 static string get_channels_full_json() {
     std::stringstream json;
     const char* config_path = web_server_get_config_path();
@@ -760,20 +796,28 @@ static string get_channels_full_json() {
                 Setting& chans = dev["channels"];
                 json << ",\"channels\":[";
                 
-                int enabled_count = 0;
                 for (int c = 0; c < chans.getLength(); c++) {
+                    // Check if channel is disabled - include ALL channels but mark disabled ones
                     bool channel_disabled = chans[c].exists("disable") && (bool)chans[c]["disable"];
-                    if (channel_disabled) continue;
                     
-                    if (enabled_count > 0) json << ",";
-                    enabled_count++;
+                    if (c > 0) json << ",";
                     
                     json << "{";
                     json << "\"channel_index\":" << c;
-                    json << ",\"enabled\":true";
+                    // Set enabled based on disable flag (inverse: disabled=false means enabled=false)
+                    json << ",\"enabled\":" << (channel_disabled ? "false" : "true");
                     
+                    bool has_freq = false;
+                    double freq_mhz = 0.0;
                     if (chans[c].exists("freq")) {
-                        json << ",\"freq\":" << (double)chans[c]["freq"];
+                        freq_mhz = setting_to_mhz(chans[c]["freq"]);
+                        has_freq = true;
+                    } else if (chans[c].exists("freqs") && chans[c]["freqs"].getLength() > 0) {
+                        freq_mhz = setting_to_mhz(chans[c]["freqs"][0]);
+                        has_freq = true;
+                    }
+                    if (has_freq) {
+                        json << ",\"freq\":" << freq_mhz;
                     }
                     if (chans[c].exists("label")) {
                         json << ",\"label\":\"" << (const char*)chans[c]["label"] << "\"";
@@ -1059,13 +1103,14 @@ static void handle_api_request(int client_fd, const char* path, const char* meth
         log(LOG_INFO, "Capture process stopped via API\n");
         send_json_response(client_fd, "{\"status\":\"success\",\"message\":\"Capture process stopped\"}");
     } else if (strcmp(path, "/api/capture/start") == 0 && strcmp(method, "POST") == 0) {
-        // Start capture process
-        // Note: All settings should already be saved to config file when changed
-        // We just enable capture - it will use the current config that's already loaded
+        // Start capture process and reload the latest configuration from disk
         extern volatile int capture_enabled;
+        extern volatile int do_exit;
         capture_enabled = 1;
-        log(LOG_INFO, "Capture process started via API - using current configuration\n");
-        send_json_response(client_fd, "{\"status\":\"success\",\"message\":\"Capture process started with current configuration\"}");
+        web_server_trigger_reload();
+        log(LOG_INFO, "Capture start requested via API - reloading configuration\n");
+        send_json_response(client_fd, "{\"status\":\"success\",\"message\":\"Capture process restarting with latest configuration\"}");
+        do_exit = 1;
     } else if (strcmp(path, "/api/capture/status") == 0 && strcmp(method, "GET") == 0) {
         // Get capture status
         extern volatile int capture_enabled;
@@ -1076,7 +1121,7 @@ static void handle_api_request(int client_fd, const char* path, const char* meth
     } else if (strncmp(path, "/api/channels", 13) == 0) {
         // Channel management endpoints
         if (strcmp(path, "/api/channels/config") == 0 && strcmp(method, "PUT") == 0) {
-            // Save channel configuration: read from channels.json, write only enabled channels to main config
+            // Save channel configuration: update disable flags in boondock_airband.conf
             if (content_length == 0 || content_length > 102400) {
                 send_error(client_fd, 400, "Invalid request body");
                 return;
@@ -1086,18 +1131,6 @@ static void handle_api_request(int client_fd, const char* path, const char* meth
             if (body.empty()) {
                 send_error(client_fd, 400, "Empty request body");
                 return;
-            }
-            
-            // Read channels.json to get all available channels
-            string channels_json;
-            if (!read_channels_json(channels_json)) {
-                send_json_response(client_fd, "{\"status\":\"error\",\"message\":\"Failed to read channels.json\"}");
-                return;
-            }
-            
-            // If channels.json is empty or invalid, fallback to main config
-            if (channels_json.empty() || channels_json.find("\"devices\"") == string::npos) {
-                channels_json = get_channels_full_json();
             }
             
             const char* config_path = web_server_get_config_path();
@@ -1152,59 +1185,75 @@ static void handle_api_request(int client_fd, const char* path, const char* meth
                 }
                 
                 // Build a set of enabled channel indices from the request body
-                // The request body contains the current state with enabled flags
+                // Prefer explicit enabled_channels list if provided
                 map<int, set<int> > enabledChannels; // device -> set of channel indices
-                
-                const char* devicesPos = strstr(body.c_str(), "\"devices\"");
-                if (devicesPos) {
-                    // Find each device block
-                    const char* devPos = strstr(devicesPos, "\"device\":");
-                    int deviceIterations = 0;
-                    const int MAX_DEVICES = 10; // Safety limit
-                    while (devPos && deviceIterations < MAX_DEVICES) {
-                        deviceIterations++;
-                        int devNum = -1;
-                        if (sscanf(devPos, "\"device\":%d", &devNum) == 1 && devNum >= 0) {
-                            // Find channels array for this device
-                            const char* channelsPos = strstr(devPos, "\"channels\"");
-                            if (channelsPos) {
-                                // Find each channel with enabled:true
-                                const char* chPos = channelsPos;
-                                int channelIterations = 0;
-                                const int MAX_CHANNELS = 100; // Safety limit
-                                while ((chPos = strstr(chPos, "\"channel_index\"")) != NULL && channelIterations < MAX_CHANNELS) {
-                                    channelIterations++;
-                                    int chIdx = -1;
-                                    if (sscanf(chPos, "\"channel_index\":%d", &chIdx) == 1 && chIdx >= 0) {
-                                        // Check if enabled
-                                        const char* enabledPos = strstr(chPos, "\"enabled\"");
-                                        if (enabledPos) {
-                                            if (strstr(enabledPos, "\"enabled\":true") != NULL || 
-                                                strstr(enabledPos, "\"enabled\":1") != NULL) {
-                                                enabledChannels[devNum].insert(chIdx);
-                                            }
-                                        }
-                                    }
-                                    chPos += 15; // Move past "channel_index"
-                                }
+                bool enabled_channels_parsed = false;
+                size_t enabled_channels_pos = body.find("\"enabled_channels\"");
+                if (enabled_channels_pos != string::npos) {
+                    size_t enabled_array_pos = body.find('[', enabled_channels_pos);
+                    if (enabled_array_pos != string::npos) {
+                        size_t pos = enabled_array_pos + 1;
+                        size_t entry_start = 0, entry_end = 0;
+                        while (find_next_object(body, pos, entry_start, entry_end)) {
+                            string entry_obj = body.substr(entry_start, entry_end - entry_start + 1);
+                            int dev_num = -1;
+                            int ch_idx = -1;
+                            const char* dev_pos = strstr(entry_obj.c_str(), "\"device\":");
+                            const char* ch_idx_pos = strstr(entry_obj.c_str(), "\"channel_index\":");
+                            if (dev_pos && ch_idx_pos &&
+                                sscanf(dev_pos, "\"device\":%d", &dev_num) == 1 && dev_num >= 0 &&
+                                sscanf(ch_idx_pos, "\"channel_index\":%d", &ch_idx) == 1 && ch_idx >= 0) {
+                                enabledChannels[dev_num].insert(ch_idx);
+                                enabled_channels_parsed = true;
                             }
+                            pos = entry_end + 1;
                         }
-                        const char* nextDevPos = strstr(devPos + 10, "\"device\":"); // Find next device
-                        if (nextDevPos == devPos) {
-                            // Prevent infinite loop - no progress made
-                            break;
-                        }
-                        devPos = nextDevPos;
                     }
                 }
                 
-                // Now read from channels.json to get all channels, then filter by enabled status
-                // Parse channels.json to find channels that match the enabled indices
-                // For now, we'll use the existing approach but read from channels.json
-                // This is a simplified implementation - proper solution would parse JSON properly
+                if (!enabled_channels_parsed) {
+                    size_t devices_pos = body.find("\"devices\"");
+                    if (devices_pos != string::npos) {
+                        size_t devices_array_pos = body.find('[', devices_pos);
+                        if (devices_array_pos != string::npos) {
+                            size_t pos = devices_array_pos + 1;
+                            size_t dev_obj_start = 0, dev_obj_end = 0;
+                            while (find_next_object(body, pos, dev_obj_start, dev_obj_end)) {
+                                string dev_obj = body.substr(dev_obj_start, dev_obj_end - dev_obj_start + 1);
+                                int dev_num = -1;
+                                const char* dev_pos = strstr(dev_obj.c_str(), "\"device\":");
+                                if (dev_pos && sscanf(dev_pos, "\"device\":%d", &dev_num) == 1 && dev_num >= 0) {
+                                    size_t channels_pos = dev_obj.find("\"channels\"");
+                                    if (channels_pos != string::npos) {
+                                        size_t channels_array_pos = dev_obj.find('[', channels_pos);
+                                        if (channels_array_pos != string::npos) {
+                                            size_t ch_pos = channels_array_pos + 1;
+                                            size_t ch_obj_start = 0, ch_obj_end = 0;
+                                            while (find_next_object(dev_obj, ch_pos, ch_obj_start, ch_obj_end)) {
+                                                string ch_obj = dev_obj.substr(ch_obj_start, ch_obj_end - ch_obj_start + 1);
+                                                int ch_idx = -1;
+                                                const char* ch_idx_pos = strstr(ch_obj.c_str(), "\"channel_index\":");
+                                                if (ch_idx_pos && sscanf(ch_idx_pos, "\"channel_index\":%d", &ch_idx) == 1 && ch_idx >= 0) {
+                                                    bool enabled = false;
+                                                    if (parse_channel_enabled_from_object(ch_obj, enabled) && enabled) {
+                                                        enabledChannels[dev_num].insert(ch_idx);
+                                                    }
+                                                }
+                                                ch_pos = ch_obj_end + 1;
+                                            }
+                                        }
+                                    }
+                                }
+                                pos = dev_obj_end + 1;
+                            }
+                        }
+                    }
+                }
                 
                 // Mark channels as disabled/enabled based on the request
-                // First, disable all channels, then enable only the selected ones
+                // IMPORTANT: Channels are NEVER removed from the config file.
+                // When disabled, they are marked with "disable = true" and remain in the config.
+                // When parsing, channels with disable=true are skipped (see config.cpp parse_channels).
                 for (int d = 0; d < devs.getLength(); d++) {
                     Setting& dev = devs[d];
                     if (!dev.exists("channels")) continue;
@@ -1224,7 +1273,7 @@ static void handle_api_request(int client_fd, const char* path, const char* meth
                                     channels[c].remove("disable");
                                 }
                             } else {
-                                // Channel is disabled - add disable flag
+                                // Channel is disabled - add disable flag (channel stays in config)
                                 if (channels[c].exists("disable")) {
                                     channels[c]["disable"] = true;
                                 } else {
@@ -1264,7 +1313,8 @@ static void handle_api_request(int client_fd, const char* path, const char* meth
                 
                 // Write config back to file
                 config.writeFile(config_path);
-                log(LOG_INFO, "Channel configuration saved (only enabled channels from channels.json)\n");
+                
+                log(LOG_INFO, "Channel configuration saved (disable flags updated in boondock_airband.conf)\n");
                 send_json_response(client_fd, "{\"status\":\"success\",\"message\":\"Configuration saved. Click 'Start Capture' to apply.\"}");
             } catch (const FileIOException& fioex) {
                 log(LOG_ERR, "I/O error saving channel config: %s\n", fioex.what());
@@ -1301,24 +1351,11 @@ static void handle_api_request(int client_fd, const char* path, const char* meth
                 send_json_response(client_fd, "{\"status\":\"error\",\"message\":\"Unknown error saving configuration. Check server logs for details.\"}");
             }
         } else if (strcmp(path, "/api/channels") == 0 && strcmp(method, "GET") == 0) {
-            // Try to read from channels.json first, fallback to main config
-            string json_content;
-            if (read_channels_json(json_content)) {
-                // Check if channels.json has valid content
-                if (json_content.find("\"devices\"") != string::npos && json_content.length() > 20) {
-                    send_json_response(client_fd, json_content.c_str());
-                } else {
-                    // Fallback to main config
-                    string json = get_channels_full_json();
-                    send_json_response(client_fd, json.c_str());
-                }
-            } else {
-                // Fallback to main config
-                string json = get_channels_full_json();
-                send_json_response(client_fd, json.c_str());
-            }
+            // Read channels directly from boondock_airband.conf
+            string json = get_channels_full_json();
+            send_json_response(client_fd, json.c_str());
         } else if (strcmp(path, "/api/channels") == 0 && strcmp(method, "POST") == 0) {
-            // Add new channel - read JSON body and save to channels.json
+            // Add new channel - read JSON body and save to boondock_airband.conf
             if (content_length == 0 || content_length > 10240) {
                 send_error(client_fd, 400, "Invalid request body");
                 return;
@@ -1330,51 +1367,8 @@ static void handle_api_request(int client_fd, const char* path, const char* meth
                 return;
             }
             
-            // Read existing channels.json
-            string json_content;
-            if (!read_channels_json(json_content)) {
-                send_json_response(client_fd, "{\"status\":\"error\",\"message\":\"Failed to read channels.json\"}");
-                return;
-            }
-            
-            // For now, we'll use a simple approach: append the new channel to channels.json
-            // In a production system, you'd want to parse JSON properly and merge
-            // For simplicity, we'll store the request body and merge it properly
-            // This is a simplified implementation - in production, use a proper JSON library
-            
-            // Try to parse and merge the new channel into the JSON structure
-            // Since we don't have a JSON parser, we'll use a workaround:
-            // Store channels as a simple append operation for now
-            // The proper solution would use a JSON library like jsoncpp or similar
-            
-            // For now, let's write the body directly to channels.json as a simple append
-            // This is a temporary solution - proper implementation would parse and merge JSON
-            
-            // Read current channels.json, parse it, add new channel, write back
-            // Since we don't have JSON parsing, we'll use a simpler approach:
-            // Store channels in a format we can easily manipulate
-            
-            // For now, let's just append to a simple JSON array structure
-            // This is a workaround - proper solution needs JSON parsing
-            
-            // Actually, let's use the existing config approach but write to channels.json instead
-            // We'll convert the JSON body to libconfig format and store it
-            
             const char* config_path = web_server_get_config_path();
             try {
-                // Read channels.json as a config file (if it exists and is valid)
-                // Otherwise, create a new structure
-                Config channels_config;
-                string json_path = get_channels_json_path();
-                
-                // Try to read existing channels.json
-                // For now, we'll use a simple approach: write the full channel list as JSON
-                // We need to merge the new channel into the existing structure
-                
-                // Since proper JSON parsing is complex, let's use a workaround:
-                // Read current channels, add new one, write back
-                // We'll use the main config approach but target channels.json
-                
                 Config config;
                 config.readFile(config_path);
                 Setting& root = config.getRoot();
@@ -1421,9 +1415,9 @@ static void handle_api_request(int client_fd, const char* path, const char* meth
                 if (freq_pos && sscanf(freq_pos, "\"freq\":%lf", &freq) == 1) {
                     if (dev.exists("mode") && strcmp(dev["mode"], "scan") == 0) {
                         Setting& freqs = new_channel.add("freqs", Setting::TypeList);
-                        freqs.add(Setting::TypeInt) = (int)(freq * 1000000);
+                        freqs.add(Setting::TypeFloat) = freq;  // Store MHz as float
                     } else {
-                        new_channel.add("freq", Setting::TypeInt) = (int)(freq * 1000000);
+                        new_channel.add("freq", Setting::TypeFloat) = freq;  // Store MHz as float
                     }
                 }
                 
@@ -1724,24 +1718,42 @@ static void handle_api_request(int client_fd, const char* path, const char* meth
                     file_out.add("filename_template", Setting::TypeString) = "${label}_${start:%Y%m%d}_${start:%H}.mp3";
                 }
                 
-                // Write to main config (for now, to keep it in sync)
+                // Write to boondock_airband.conf
                 config.writeFile(config_path);
                 
-                // Also write to channels.json
-                string full_json = get_channels_full_json();
-                write_channels_json(full_json);
-                
-                log(LOG_INFO, "New channel added to device %d (saved to channels.json)\n", device_idx);
-                send_json_response(client_fd, "{\"status\":\"success\",\"message\":\"Channel added successfully to channels.json\"}");
+                log(LOG_INFO, "New channel added to device %d (saved to boondock_airband.conf)\n", device_idx);
+                send_json_response(client_fd, "{\"status\":\"success\",\"message\":\"Channel added successfully to boondock_airband.conf\"}");
             } catch (const FileIOException& fioex) {
                 log(LOG_ERR, "I/O error adding channel: %s\n", fioex.what());
                 send_json_response(client_fd, "{\"status\":\"error\",\"message\":\"I/O error while updating config file\"}");
             } catch (const ParseException& pex) {
-                log(LOG_ERR, "Parse error adding channel: %s\n", pex.what());
-                send_json_response(client_fd, "{\"status\":\"error\",\"message\":\"Parse error in config file\"}");
+                log(LOG_ERR, "Parse error adding channel at %s: %s\n", pex.getFile(), pex.getError());
+                char error_msg[512];
+                snprintf(error_msg, sizeof(error_msg), "{\"status\":\"error\",\"message\":\"Parse error in config file: %s\"}", pex.getError());
+                send_json_response(client_fd, error_msg);
+            } catch (const SettingNotFoundException& nfex) {
+                log(LOG_ERR, "Setting not found adding channel: %s\n", nfex.getPath());
+                char error_msg[512];
+                snprintf(error_msg, sizeof(error_msg), "{\"status\":\"error\",\"message\":\"Setting not found: %s\"}", nfex.getPath());
+                send_json_response(client_fd, error_msg);
+            } catch (const SettingTypeException& tex) {
+                log(LOG_ERR, "Setting type error adding channel: %s\n", tex.getPath());
+                char error_msg[512];
+                snprintf(error_msg, sizeof(error_msg), "{\"status\":\"error\",\"message\":\"Type error at: %s\"}", tex.getPath());
+                send_json_response(client_fd, error_msg);
+            } catch (const ConfigException& cex) {
+                log(LOG_ERR, "Config exception adding channel: %s\n", cex.what());
+                char error_msg[512];
+                snprintf(error_msg, sizeof(error_msg), "{\"status\":\"error\",\"message\":\"Config error: %s\"}", cex.what());
+                send_json_response(client_fd, error_msg);
             } catch (const std::exception& ex) {
-                log(LOG_ERR, "Error adding channel: %s\n", ex.what());
-                send_json_response(client_fd, "{\"status\":\"error\",\"message\":\"Error adding channel\"}");
+                log(LOG_ERR, "Standard exception adding channel: %s\n", ex.what());
+                char error_msg[512];
+                snprintf(error_msg, sizeof(error_msg), "{\"status\":\"error\",\"message\":\"Error: %s\"}", ex.what());
+                send_json_response(client_fd, error_msg);
+            } catch (...) {
+                log(LOG_ERR, "Unknown exception adding channel\n");
+                send_json_response(client_fd, "{\"status\":\"error\",\"message\":\"Unknown error adding channel\"}");
             }
         } else {
             // Parse device and channel from path like /api/channels/0/1
@@ -1802,14 +1814,38 @@ static void handle_api_request(int client_fd, const char* path, const char* meth
                         const char* freq_pos = strstr(body.c_str(), "\"freq\"");
                         if (freq_pos && sscanf(freq_pos, "\"freq\":%lf", &freq) == 1) {
                             if (dev.exists("mode") && strcmp(dev["mode"], "scan") == 0) {
-                                // Scan mode - update freqs array
+                                // Scan mode - update freqs array using existing element type
                                 if (channel.exists("freqs") && channel["freqs"].getLength() > 0) {
-                                    channel["freqs"][0] = (int)(freq * 1000000);
+                                    Setting& freqs = channel["freqs"];
+                                    Setting::Type elem_type = freqs[0].getType();
+                                    if (elem_type == Setting::TypeInt) {
+                                        freqs[0] = (int)(freq * 1000000);
+                                    } else if (elem_type == Setting::TypeFloat) {
+                                        freqs[0] = freq;
+                                    } else {
+                                        channel.remove("freqs");
+                                        Setting& new_freqs = channel.add("freqs", Setting::TypeList);
+                                        new_freqs.add(Setting::TypeFloat) = freq;
+                                    }
+                                } else {
+                                    Setting& new_freqs = channel.add("freqs", Setting::TypeList);
+                                    new_freqs.add(Setting::TypeFloat) = freq;
                                 }
                             } else {
-                                // Multichannel mode
-                                if (channel.exists("freq")) channel["freq"] = (int)(freq * 1000000);
-                                else channel.add("freq", Setting::TypeInt) = (int)(freq * 1000000);
+                                // Multichannel mode - keep existing type if possible
+                                if (channel.exists("freq")) {
+                                    Setting::Type freq_type = channel["freq"].getType();
+                                    if (freq_type == Setting::TypeInt) {
+                                        channel["freq"] = (int)(freq * 1000000);
+                                    } else if (freq_type == Setting::TypeFloat) {
+                                        channel["freq"] = freq;
+                                    } else {
+                                        channel.remove("freq");
+                                        channel.add("freq", Setting::TypeFloat) = freq;
+                                    }
+                                } else {
+                                    channel.add("freq", Setting::TypeFloat) = freq;
+                                }
                             }
                         }
                         
@@ -2098,12 +2134,8 @@ static void handle_api_request(int client_fd, const char* path, const char* meth
                         // Write to main config (for now, to keep it in sync)
                         config.writeFile(config_path);
                         
-                        // Also write to channels.json
-                        string full_json = get_channels_full_json();
-                        write_channels_json(full_json);
-                        
-                        log(LOG_INFO, "Channel %d/%d updated (saved to channels.json)\n", device_idx, channel_idx);
-                        send_json_response(client_fd, "{\"status\":\"success\",\"message\":\"Channel updated successfully in channels.json\"}");
+                        log(LOG_INFO, "Channel %d/%d updated (saved to boondock_airband.conf)\n", device_idx, channel_idx);
+                        send_json_response(client_fd, "{\"status\":\"success\",\"message\":\"Channel updated successfully in boondock_airband.conf\"}");
                     } catch (const FileIOException& fioex) {
                         log(LOG_ERR, "I/O error updating channel: %s\n", fioex.what());
                         send_json_response(client_fd, "{\"status\":\"error\",\"message\":\"I/O error while updating config file\"}");
@@ -2115,7 +2147,7 @@ static void handle_api_request(int client_fd, const char* path, const char* meth
                         send_json_response(client_fd, "{\"status\":\"error\",\"message\":\"Error updating channel\"}");
                     }
                 } else if (strcmp(method, "DELETE") == 0) {
-                    // Delete channel - set disable = true in config
+                    // Delete channel - completely remove it from the config file
                     const char* config_path = web_server_get_config_path();
                     try {
                         Config config;
@@ -2125,22 +2157,17 @@ static void handle_api_request(int client_fd, const char* path, const char* meth
                         if (root.exists("devices") && device_idx >= 0 && device_idx < root["devices"].getLength()) {
                             Setting& dev = root["devices"][device_idx];
                             if (dev.exists("channels") && channel_idx >= 0 && channel_idx < dev["channels"].getLength()) {
-                                Setting& channel = dev["channels"][channel_idx];
-                                // Set disable = true to mark channel as deleted
-                                if (channel.exists("disable")) {
-                                    channel["disable"] = true;
-                                } else {
-                                    channel.add("disable", Setting::TypeBoolean) = true;
-                                }
+                                Setting& channels = dev["channels"];
                                 
-                                // Write to main config (for now, to keep it in sync)
+                                // Remove the channel from the array (completely delete it from config)
+                                // libconfig supports removing list elements by index using remove(int)
+                                channels.remove(channel_idx);
+                                
+                                // Write updated config back to file
                                 config.writeFile(config_path);
                                 
-                                // Also write to channels.json
-                                string full_json = get_channels_full_json();
-                                write_channels_json(full_json);
-                                
-                                send_json_response(client_fd, "{\"status\":\"success\",\"message\":\"Channel deleted from channels.json\"}");
+                                log(LOG_INFO, "Channel %d from device %d completely removed from boondock_airband.conf\n", channel_idx, device_idx);
+                                send_json_response(client_fd, "{\"status\":\"success\",\"message\":\"Channel permanently deleted from boondock_airband.conf. Restart required.\"}");
                             } else {
                                 send_json_response(client_fd, "{\"status\":\"error\",\"message\":\"Invalid channel index\"}");
                             }
@@ -2148,10 +2175,16 @@ static void handle_api_request(int client_fd, const char* path, const char* meth
                             send_json_response(client_fd, "{\"status\":\"error\",\"message\":\"Invalid device index\"}");
                         }
                     } catch (const FileIOException& fioex) {
+                        log(LOG_ERR, "I/O error deleting channel: %s\n", fioex.what());
                         send_json_response(client_fd, "{\"status\":\"error\",\"message\":\"I/O error while reading config file\"}");
                     } catch (const ParseException& pex) {
+                        log(LOG_ERR, "Parse error deleting channel at %s: %s\n", pex.getFile(), pex.getError());
                         send_json_response(client_fd, "{\"status\":\"error\",\"message\":\"Parse error in config file\"}");
+                    } catch (const std::exception& ex) {
+                        log(LOG_ERR, "Exception deleting channel: %s\n", ex.what());
+                        send_json_response(client_fd, "{\"status\":\"error\",\"message\":\"Error deleting channel\"}");
                     } catch (...) {
+                        log(LOG_ERR, "Unknown error deleting channel\n");
                         send_json_response(client_fd, "{\"status\":\"error\",\"message\":\"Unknown error modifying config\"}");
                     }
                 } else {
