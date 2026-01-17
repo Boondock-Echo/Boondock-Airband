@@ -342,13 +342,16 @@ static void flush_metadata_buffer(file_data* fdata) {
         char time_str[64];
         strftime(time_str, sizeof(time_str), "%Y-%m-%d %H:%M:%S", timeinfo);
         
-        fprintf(fdata->metadata_f, "%s,%d,%s,%d,%.1f,%.1f\n",
+        fprintf(fdata->metadata_f, "%s,%d,%s,%d,%.1f,%.1f,%.1f,%.1f,%zu\n",
                 time_str,
                 entry.channel_id,
                 entry.channel_name.c_str(),
                 entry.frequency_hz,
                 entry.signal_dbfs,
-                entry.snr_db);
+                entry.snr_db,
+                entry.noise_level_dbfs,
+                entry.squelch_level_dbfs,
+                entry.ctcss_count);
     }
     
     fflush(fdata->metadata_f);
@@ -389,6 +392,9 @@ static void log_metadata(file_data* fdata, channel_t* channel) {
     
     float noise_dbfs = level_to_dBFS(fparms->squelch.noise_level());
     entry.snr_db = entry.signal_dbfs - noise_dbfs;
+    entry.noise_level_dbfs = noise_dbfs;
+    entry.squelch_level_dbfs = level_to_dBFS(fparms->squelch.squelch_level());
+    entry.ctcss_count = fparms->squelch.ctcss_count();
     
     // Add to buffer
     fdata->metadata_buffer.push_back(entry);
@@ -430,7 +436,7 @@ static int open_metadata_file(file_data* fdata) {
     fseek(fdata->metadata_f, 0, SEEK_END);
     long file_size = ftell(fdata->metadata_f);
     if (file_size == 0) {
-        fprintf(fdata->metadata_f, "Timestamp,Channel_ID,Channel_Name,Frequency_Hz,Signal_dBFS,SNR_dB\n");
+        fprintf(fdata->metadata_f, "Timestamp,Channel_ID,Channel_Name,Frequency_Hz,Signal_dBFS,SNR_dB,Noise_dBFS,Squelch_dBFS,CTCSS_Count\n");
         fflush(fdata->metadata_f);
     }
     

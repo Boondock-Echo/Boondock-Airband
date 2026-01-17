@@ -31,7 +31,12 @@
         .form-group { margin-bottom: 15px; }
         .form-group label { display: block; margin-bottom: 5px; font-weight: 500; }
         .form-group input, .form-group select { width: 100%; padding: 8px; border: 1px solid #ddd; border-radius: 4px; }
-        .signal-bar { height: 20px; background: linear-gradient(to right, #28a745, #ffc107, #dc3545); border-radius: 4px; }
+        .signal-bar { height: 20px; background: linear-gradient(to right, #28a745, #ffc107, #dc3545); border-radius: 4px; position: relative; }
+        .bar-container { position: relative; width: 100%; height: 24px; background: #e0e0e0; border-radius: 4px; overflow: hidden; }
+        .bar-fill { height: 100%; transition: width 0.3s ease; border-radius: 4px; }
+        .signal-bar-fill { background: linear-gradient(to right, #dc3545, #ffc107, #28a745); }
+        .snr-bar-fill { background: linear-gradient(to right, #dc3545, #ffc107, #28a745); }
+        .bar-text { position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%); font-size: 12px; font-weight: 600; color: #333; text-shadow: 0 0 2px rgba(255,255,255,0.8), 0 0 2px rgba(255,255,255,0.8); z-index: 10; pointer-events: none; }
         .hidden { display: none; }
         .modal { display: none; position: fixed; z-index: 1000; left: 0; top: 0; width: 100%; height: 100%; overflow: auto; background-color: rgba(0,0,0,0.4); }
         .modal-content { background-color: #fefefe; margin: 5% auto; padding: 20px; border: 1px solid #888; width: 90%; max-width: 800px; border-radius: 8px; max-height: 90vh; overflow-y: auto; box-shadow: 0 4px 6px rgba(0,0,0,0.1); }
@@ -86,21 +91,48 @@
                 </div>
             </div>
             <div class="card">
-                <h2>Channel Status</h2>
+                <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px;">
+                    <h2>Channel Status</h2>
+                    <button class="btn btn-primary" onclick="showColumnSelector()" style="font-size: 12px; padding: 5px 10px;">⚙️ View</button>
+                </div>
                 <table id="channels-table">
                     <thead>
                         <tr>
-                            <th>CHANNEL</th>
-                            <th>SIGNAL</th>
-                            <th>SNR</th>
-                            <th>SIGNAL STRENGTH</th>
-                            <th>STATUS</th>
+                            <th data-col="name" class="col-toggle">CHANNEL NAME</th>
+                            <th data-col="freq" class="col-toggle">FREQ</th>
+                            <th data-col="ch" class="col-toggle">CH#</th>
+                            <th data-col="udp" class="col-toggle">UDP</th>
+                            <th data-col="signal" class="col-toggle">SIG</th>
+                            <th data-col="noise" class="col-toggle">NOISE</th>
+                            <th data-col="squelch" class="col-toggle">SQL</th>
+                            <th data-col="snr" class="col-toggle">SNR</th>
+                            <th data-col="strength" class="col-toggle">STR</th>
+                            <th data-col="ctcss" class="col-toggle">CTCSS</th>
+                            <th data-col="rec" class="col-toggle">REC</th>
                         </tr>
                     </thead>
                     <tbody id="channels-tbody"></tbody>
                 </table>
                 <div style="margin-top: 10px; font-size: 14px; color: #666;">
                     <span id="channels-count">0</span> channels | <span id="service-status">Running</span> | Polling every 1s
+                </div>
+            </div>
+            
+            <!-- Column Selector Modal -->
+            <div id="column-selector-modal" class="modal" style="display: none;" onclick="if(event.target === this) closeColumnSelector();">
+                <div class="modal-content" style="max-width: 400px;" onclick="event.stopPropagation();">
+                    <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 15px;">
+                        <h3>Select Columns</h3>
+                        <span onclick="closeColumnSelector()" style="cursor: pointer; font-size: 24px; color: #999;">&times;</span>
+                    </div>
+                    <div id="column-checkboxes" style="display: grid; grid-template-columns: 1fr 1fr; gap: 10px;">
+                        <!-- Will be populated by JavaScript -->
+                    </div>
+                    <div style="margin-top: 15px; display: flex; gap: 10px;">
+                        <button class="btn btn-primary" onclick="applyColumnSelection()">Apply</button>
+                        <button class="btn btn-secondary" onclick="resetColumnSelection()">Reset</button>
+                        <button class="btn btn-secondary" onclick="closeColumnSelector()">Cancel</button>
+                    </div>
                 </div>
             </div>
             <div class="card" id="errors-card" style="display: none;">
@@ -527,8 +559,8 @@
                         </div>
                         <div class="form-group">
                             <label>Directory: *</label>
-                            <input type="text" id="output-directory" name="directory" placeholder="/opt/boondock/airband_capture/recordings">
-                            <small>Directory where audio files will be stored. Must exist.</small>
+                            <input type="text" id="output-directory" name="directory" placeholder="recordings/">
+                            <small>Directory where audio files will be stored. Must exist. Default: recordings/ (relative to current directory).</small>
                         </div>
                         <div class="form-group">
                             <label>Filename Template: *</label>
@@ -646,6 +678,7 @@
         
         function startStatusPolling() {
             if (statusInterval) clearInterval(statusInterval);
+            loadColumnVisibility();
             updateStatus();
             statusInterval = setInterval(updateStatus, 1000);
         }
@@ -657,6 +690,138 @@
             }
         }
         
+        // Column visibility management
+        var columnVisibility = {
+            name: true,
+            freq: true,
+            ch: true,
+            udp: false,
+            signal: true,
+            noise: true,
+            squelch: true,
+            snr: true,
+            strength: false,
+            ctcss: true,
+            rec: true
+        };
+        
+        function loadColumnVisibility() {
+            var saved = localStorage.getItem("channelColumns");
+            if (saved) {
+                try {
+                    columnVisibility = JSON.parse(saved);
+                } catch(e) {
+                    console.error("Failed to load column visibility:", e);
+                }
+            }
+            applyColumnVisibility();
+        }
+        
+        function saveColumnVisibility() {
+            localStorage.setItem("channelColumns", JSON.stringify(columnVisibility));
+        }
+        
+        function applyColumnVisibility() {
+            var headers = document.querySelectorAll("#channels-table th.col-toggle");
+            headers.forEach(function(th) {
+                var col = th.getAttribute("data-col");
+                if (col && columnVisibility[col] !== undefined) {
+                    if (columnVisibility[col]) {
+                        th.style.display = "";
+                    } else {
+                        th.style.display = "none";
+                    }
+                }
+            });
+            
+            var rows = document.querySelectorAll("#channels-tbody tr");
+            rows.forEach(function(row) {
+                var cells = row.querySelectorAll("td[data-col]");
+                cells.forEach(function(cell) {
+                    var col = cell.getAttribute("data-col");
+                    if (col && columnVisibility[col] !== undefined) {
+                        if (columnVisibility[col]) {
+                            cell.style.display = "";
+                        } else {
+                            cell.style.display = "none";
+                        }
+                    }
+                });
+            });
+        }
+        
+        function showColumnSelector() {
+            var modal = document.getElementById("column-selector-modal");
+            var checkboxes = document.getElementById("column-checkboxes");
+            checkboxes.innerHTML = "";
+            
+            var columnLabels = {
+                name: "Channel Name",
+                freq: "Frequency",
+                ch: "Channel #",
+                udp: "UDP Port",
+                signal: "Signal Level",
+                noise: "Noise Level",
+                squelch: "Squelch Level",
+                snr: "SNR",
+                strength: "Signal Strength",
+                ctcss: "CTCSS Count",
+                rec: "Recording"
+            };
+            
+            for (var col in columnVisibility) {
+                var label = document.createElement("label");
+                label.style.cssText = "display: flex; align-items: center; gap: 8px; cursor: pointer;";
+                
+                var checkbox = document.createElement("input");
+                checkbox.type = "checkbox";
+                checkbox.checked = columnVisibility[col];
+                checkbox.setAttribute("data-col", col);
+                
+                var span = document.createElement("span");
+                span.textContent = columnLabels[col] || col;
+                
+                label.appendChild(checkbox);
+                label.appendChild(span);
+                checkboxes.appendChild(label);
+            }
+            
+            modal.style.display = "block";
+        }
+        
+        function closeColumnSelector() {
+            document.getElementById("column-selector-modal").style.display = "none";
+        }
+        
+        function applyColumnSelection() {
+            var checkboxes = document.querySelectorAll("#column-checkboxes input[type='checkbox']");
+            checkboxes.forEach(function(cb) {
+                var col = cb.getAttribute("data-col");
+                columnVisibility[col] = cb.checked;
+            });
+            saveColumnVisibility();
+            applyColumnVisibility();
+            closeColumnSelector();
+        }
+        
+        function resetColumnSelection() {
+            columnVisibility = {
+                name: true,
+                freq: true,
+                ch: true,
+                udp: false,
+                signal: true,
+                noise: true,
+                squelch: true,
+                snr: true,
+                strength: false,
+                ctcss: true,
+                rec: true
+            };
+            saveColumnVisibility();
+            showColumnSelector();
+        }
+        
         function updateStatus() {
             fetch("/api/status")
                 .then(function(r) { return r.json(); })
@@ -665,14 +830,55 @@
                     tbody.innerHTML = "";
                     data.channels.forEach(function(ch) {
                         var row = document.createElement("tr");
-                        var signalPercent = Math.max(0, Math.min(100, (ch.signal_level + 30) / 0.3));
                         var label = ch.label || ("Channel " + ch.channel);
                         var statusMark = ch.status === "signal" ? "*" : "";
-                        row.innerHTML = "<td>" + label + " | Ch #" + ch.channel + " | " + ch.frequency + " MHz | UDP: " + (6001 + ch.channel) + "</td>" +
-                            "<td>" + ch.signal_level.toFixed(1) + "/" + ch.noise_level.toFixed(1) + statusMark + "</td>" +
-                            "<td>" + ch.snr.toFixed(1) + " dB</td>" +
-                            "<td><div class=\"signal-bar\" style=\"width: " + signalPercent + "%; height: 20px;\"></div> " + ch.signal_level.toFixed(1) + " dB</td>" +
-                            "<td class=\"status-enabled\">Enabled</td>";
+                        var udpPort = 6001 + ch.channel;
+                        
+                        // Signal Strength: -80 dB (worst) to 0 dB (best) = 0% to 100%
+                        var signalStrength = ch.signal_level;
+                        var signalPercent = Math.max(0, Math.min(100, ((signalStrength - (-80)) / (0 - (-80))) * 100));
+                        
+                        // SNR: 0 dB (worst) to 50 dB (best) = 0% to 100%
+                        var snr = ch.snr;
+                        var snrPercent = Math.max(0, Math.min(100, (snr / 50) * 100));
+                        
+                        // Recording status (compact)
+                        var recordingStatus = "";
+                        if (ch.has_file_output) {
+                            if (ch.is_recording) {
+                                recordingStatus = "<span style=\"color: #28a745; font-weight: bold;\">●</span>";
+                            } else {
+                                recordingStatus = "<span style=\"color: #999;\">○</span>";
+                            }
+                        } else {
+                            recordingStatus = "<span style=\"color: #ccc;\">—</span>";
+                        }
+                        
+                        // Compact display with all columns
+                        var cells = [
+                            {col: "name", html: "<span title=\"" + label + "\">" + (label.length > 15 ? label.substring(0, 12) + "..." : label) + "</span>"},
+                            {col: "freq", html: ch.frequency + " MHz"},
+                            {col: "ch", html: "#" + ch.channel},
+                            {col: "udp", html: udpPort},
+                            {col: "signal", html: "<span title=\"Signal: " + ch.signal_level.toFixed(1) + " dB\">" + ch.signal_level.toFixed(1) + " dB</span>"},
+                            {col: "noise", html: "<span title=\"Noise: " + (ch.noise_level || 0).toFixed(1) + " dB\">" + (ch.noise_level || 0).toFixed(1) + " dB</span>"},
+                            {col: "squelch", html: "<span title=\"Squelch: " + (ch.squelch_level || 0).toFixed(1) + " dB\">" + (ch.squelch_level || 0).toFixed(1) + " dB</span>"},
+                            {col: "snr", html: "<div class=\"bar-container\" style=\"min-width: 60px;\"><div class=\"bar-fill snr-bar-fill\" style=\"width: " + snrPercent + "%;\"></div><span class=\"bar-text\">" + snr.toFixed(1) + " dB</span></div>"},
+                            {col: "strength", html: "<div class=\"bar-container\" style=\"min-width: 60px;\"><div class=\"bar-fill signal-bar-fill\" style=\"width: " + signalPercent + "%;\"></div><span class=\"bar-text\">" + signalStrength.toFixed(1) + " dB</span></div>"},
+                            {col: "ctcss", html: "<span title=\"CTCSS detections: " + (ch.ctcss_count || 0) + "\">" + (ch.ctcss_count || 0) + "</span>"},
+                            {col: "rec", html: recordingStatus}
+                        ];
+                        
+                        cells.forEach(function(cell) {
+                            var td = document.createElement("td");
+                            td.setAttribute("data-col", cell.col);
+                            td.innerHTML = cell.html;
+                            if (!columnVisibility[cell.col]) {
+                                td.style.display = "none";
+                            }
+                            row.appendChild(td);
+                        });
+                        
                         tbody.appendChild(row);
                     });
                     document.getElementById("channels-count").textContent = data.channels.length;
@@ -1297,16 +1503,16 @@
                 freq: parseFloat(formData.get("freq")),
                 modulation: formData.get("modulation"),
                 enabled: formData.get("enabled") === "on",
-                highpass: formData.get("highpass") ? parseInt(formData.get("highpass")) : null,
-                lowpass: formData.get("lowpass") ? parseInt(formData.get("lowpass")) : null,
-                bandwidth: formData.get("bandwidth") ? parseInt(formData.get("bandwidth")) : null,
-                ampfactor: formData.get("ampfactor") ? parseFloat(formData.get("ampfactor")) : null,
-                squelch_threshold: formData.get("squelch_threshold") ? parseFloat(formData.get("squelch_threshold")) : null,
-                squelch_snr_threshold: formData.get("squelch_snr_threshold") ? parseFloat(formData.get("squelch_snr_threshold")) : null,
-                afc: formData.get("afc") ? parseInt(formData.get("afc")) : null,
-                notch: formData.get("notch") ? parseFloat(formData.get("notch")) : null,
-                notch_q: formData.get("notch_q") ? parseFloat(formData.get("notch_q")) : null,
-                ctcss: formData.get("ctcss") ? parseFloat(formData.get("ctcss")) : null,
+                highpass: (formData.get("highpass") && formData.get("highpass") !== "" && parseInt(formData.get("highpass")) > 0) ? parseInt(formData.get("highpass")) : null,
+                lowpass: (formData.get("lowpass") && formData.get("lowpass") !== "" && parseInt(formData.get("lowpass")) > 0) ? parseInt(formData.get("lowpass")) : null,
+                bandwidth: (formData.get("bandwidth") && formData.get("bandwidth") !== "" && parseInt(formData.get("bandwidth")) > 0) ? parseInt(formData.get("bandwidth")) : null,
+                ampfactor: (formData.get("ampfactor") && formData.get("ampfactor") !== "" && parseFloat(formData.get("ampfactor")) !== 1.0) ? parseFloat(formData.get("ampfactor")) : null,
+                squelch_threshold: (formData.get("squelch_threshold") && formData.get("squelch_threshold") !== "" && parseFloat(formData.get("squelch_threshold")) !== 0) ? parseFloat(formData.get("squelch_threshold")) : null,
+                squelch_snr_threshold: (formData.get("squelch_snr_threshold") && formData.get("squelch_snr_threshold") !== "" && parseFloat(formData.get("squelch_snr_threshold")) !== 0) ? parseFloat(formData.get("squelch_snr_threshold")) : null,
+                afc: (formData.get("afc") && formData.get("afc") !== "" && parseInt(formData.get("afc")) > 0) ? parseInt(formData.get("afc")) : null,
+                notch: (formData.get("notch") && formData.get("notch") !== "" && parseFloat(formData.get("notch")) > 0) ? parseFloat(formData.get("notch")) : null,
+                notch_q: (formData.get("notch_q") && formData.get("notch_q") !== "" && parseFloat(formData.get("notch_q")) !== 10.0) ? parseFloat(formData.get("notch_q")) : null,
+                ctcss: (formData.get("ctcss") && formData.get("ctcss") !== "" && parseFloat(formData.get("ctcss")) > 0) ? parseFloat(formData.get("ctcss")) : null,
                 outputs: []
             };
             

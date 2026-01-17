@@ -137,6 +137,9 @@ struct metadata_entry {
     int frequency_hz;
     float signal_dbfs;
     float snr_db;
+    float noise_level_dbfs;
+    float squelch_level_dbfs;
+    size_t ctcss_count;
 };
 
 struct file_data {

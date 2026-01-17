@@ -21,7 +21,11 @@
 #include <SoapySDR/Types.h>   // SoapySDRKwargs
 #define SOAPYSDR_DEFAULT_SAMPLE_RATE 2560000
 #define SOAPYSDR_BUFSIZE 320000
-#define SOAPYSDR_READSTREAM_TIMEOUT_US 1000000L
+#define SOAPYSDR_READSTREAM_TIMEOUT_US 5000000L  // 5 seconds - increased from 1s to reduce false timeouts
+#define SOAPYSDR_MAX_CONSECUTIVE_TIMEOUTS 20     // Max consecutive timeouts before reconnection (increased threshold)
+#define SOAPYSDR_RECONNECT_DELAY_MS 2000         // Initial delay before reconnection attempt (ms)
+#define SOAPYSDR_MAX_RECONNECT_DELAY_MS 30000    // Maximum delay between reconnection attempts (ms)
+#define SOAPYSDR_TIMEOUT_LOG_INTERVAL 5           // Only log timeout every N occurrences to reduce log spam
 
 typedef struct {
     SoapySDRDevice* dev;        // pointer to device struct
@@ -33,4 +37,7 @@ typedef struct {
     double gain;                // gain in dB
     size_t channel;             // HW channel number
     bool agc;                   // enable AGC
+    int consecutive_timeouts;  // counter for consecutive timeout errors
+    int reconnect_delay_ms;   // current delay before reconnection (exponential backoff)
+    int timeout_log_counter;  // counter to reduce log verbosity
 } soapysdr_dev_data_t;

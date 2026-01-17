@@ -164,16 +164,41 @@ static string get_channels_status_json() {
             
             const char* label = fparms->label ? fparms->label : "";
             
+            // Check if channel has file output and is currently recording
+            bool is_recording = false;
+            bool has_file_output = false;
+            for (int k = 0; k < channel->output_count; k++) {
+                output_t* output = channel->outputs + k;
+                if (output->type == O_FILE && output->data && output->enabled) {
+                    has_file_output = true;
+                    file_data* fdata = (file_data*)(output->data);
+                    // Recording if file is open and (has signal OR continuous recording)
+                    if (fdata->f != NULL) {
+                        // Check if continuous or if there's a signal
+                        if (fdata->continuous || channel->axcindicate == SIGNAL) {
+                            is_recording = true;
+                        }
+                    }
+                }
+            }
+            
             if (!first) json << ",";
             first = false;
+            
+            float squelch_dbfs = level_to_dBFS(fparms->squelch.squelch_level());
+            size_t ctcss_count = fparms->squelch.ctcss_count();
             
             json << "{\"channel\":" << i 
                  << ",\"frequency\":" << std::fixed << std::setprecision(3) << freq_mhz
                  << ",\"label\":\"" << label << "\""
                  << ",\"signal_level\":" << std::setprecision(1) << signal_dbfs
                  << ",\"noise_level\":" << noise_dbfs
+                 << ",\"squelch_level\":" << squelch_dbfs
                  << ",\"snr\":" << snr
-                 << ",\"status\":\"" << status_str << "\"}";
+                 << ",\"ctcss_count\":" << ctcss_count
+                 << ",\"status\":\"" << status_str << "\""
+                 << ",\"has_file_output\":" << (has_file_output ? "true" : "false")
+                 << ",\"is_recording\":" << (is_recording ? "true" : "false") << "}";
         }
     }
     
@@ -732,14 +757,13 @@ static void handle_api_request(int client_fd, const char* path, const char* meth
             }
         }
         
-        // Send SIGHUP to current process to trigger configuration reload
-        // This is the standard way to trigger reload in daemon processes
-        pid_t pid = getpid();
-        if (kill(pid, SIGHUP) == 0) {
-            log(LOG_INFO, "SIGHUP sent for configuration reload\n");
+        // Trigger configuration reload using the web_server_trigger_reload function
+        // This sets the do_reload flag which is checked by the main thread
+        if (web_server_trigger_reload() == 0) {
+            log(LOG_INFO, "Configuration reload triggered via do_reload flag\n");
             send_json_response(client_fd, "{\"status\":\"success\",\"message\":\"Configuration reload triggered. Changes will be applied.\"}");
         } else {
-            log(LOG_ERR, "Failed to send SIGHUP for reload: %s\n", strerror(errno));
+            log(LOG_ERR, "Failed to trigger configuration reload\n");
             send_error(client_fd, 500, "Failed to trigger configuration reload");
         }
     } else if (strncmp(path, "/api/channels", 13) == 0) {
@@ -748,8 +772,184 @@ static void handle_api_request(int client_fd, const char* path, const char* meth
             string json = get_channels_full_json();
             send_json_response(client_fd, json.c_str());
         } else if (strcmp(path, "/api/channels") == 0 && strcmp(method, "POST") == 0) {
-            // Add new channel - requires config file modification
-            send_json_response(client_fd, "{\"status\":\"success\",\"message\":\"Channel added. Restart required.\"}");
+            // Add new channel - read JSON body and save to config
+            if (content_length == 0 || content_length > 10240) {
+                send_error(client_fd, 400, "Invalid request body");
+                return;
+            }
+            
+            string body = read_request_body(client_fd, content_length);
+            if (body.empty()) {
+                send_error(client_fd, 400, "Empty request body");
+                return;
+            }
+            
+            const char* config_path = web_server_get_config_path();
+            try {
+                Config config;
+                config.readFile(config_path);
+                Setting& root = config.getRoot();
+                
+                // Extract device_index from JSON
+                int device_idx = -1;
+                const char* dev_pos = strstr(body.c_str(), "\"device_index\"");
+                if (dev_pos && sscanf(dev_pos, "\"device_index\":%d", &device_idx) == 1) {
+                    // device_idx is set
+                } else {
+                    send_json_response(client_fd, "{\"status\":\"error\",\"message\":\"Missing device_index\"}");
+                    return;
+                }
+                
+                if (!root.exists("devices") || device_idx < 0 || device_idx >= root["devices"].getLength()) {
+                    send_json_response(client_fd, "{\"status\":\"error\",\"message\":\"Invalid device index\"}");
+                    return;
+                }
+                
+                Setting& dev = root["devices"][device_idx];
+                if (!dev.exists("channels")) {
+                    dev.add("channels", Setting::TypeList);
+                }
+                
+                Setting& channels = dev["channels"];
+                Setting& new_channel = channels.add(Setting::TypeGroup);
+                
+                // Parse and set channel fields (same as PUT handler)
+                char label[256] = {0};
+                double freq = 0;
+                char modulation[16] = "am";
+                int highpass = 100, lowpass = 2500, bandwidth = 5000, afc = 0;
+                double ampfactor = 1.0, squelch_threshold = 0, squelch_snr_threshold = 0;
+                double notch = 0, notch_q = 10.0, ctcss = 0;
+                
+                // Parse label
+                const char* label_pos = strstr(body.c_str(), "\"label\"");
+                if (label_pos && sscanf(label_pos, "\"label\":\"%255[^\"]\"", label) == 1) {
+                    new_channel.add("label", Setting::TypeString) = label;
+                }
+                
+                // Parse frequency
+                const char* freq_pos = strstr(body.c_str(), "\"freq\"");
+                if (freq_pos && sscanf(freq_pos, "\"freq\":%lf", &freq) == 1) {
+                    if (dev.exists("mode") && strcmp(dev["mode"], "scan") == 0) {
+                        Setting& freqs = new_channel.add("freqs", Setting::TypeList);
+                        freqs.add(Setting::TypeInt) = (int)(freq * 1000000);
+                    } else {
+                        new_channel.add("freq", Setting::TypeInt) = (int)(freq * 1000000);
+                    }
+                }
+                
+                // Parse modulation
+                const char* mod_pos = strstr(body.c_str(), "\"modulation\"");
+                if (mod_pos && sscanf(mod_pos, "\"modulation\":\"%15[^\"]\"", modulation) == 1) {
+                    new_channel.add("modulation", Setting::TypeString) = modulation;
+                }
+                
+                // Parse other fields - only add if they have valid non-default values
+                const char* hp_pos = strstr(body.c_str(), "\"highpass\"");
+                if (hp_pos && strstr(hp_pos, ":null") == NULL) {
+                    if (sscanf(hp_pos, "\"highpass\":%d", &highpass) == 1 && highpass > 0) {
+                        new_channel.add("highpass", Setting::TypeInt) = highpass;
+                    }
+                }
+                
+                const char* lp_pos = strstr(body.c_str(), "\"lowpass\"");
+                if (lp_pos && strstr(lp_pos, ":null") == NULL) {
+                    if (sscanf(lp_pos, "\"lowpass\":%d", &lowpass) == 1 && lowpass > 0) {
+                        new_channel.add("lowpass", Setting::TypeInt) = lowpass;
+                    }
+                }
+                
+                const char* bw_pos = strstr(body.c_str(), "\"bandwidth\"");
+                if (bw_pos && strstr(bw_pos, ":null") == NULL) {
+                    if (sscanf(bw_pos, "\"bandwidth\":%d", &bandwidth) == 1 && bandwidth > 0) {
+                        new_channel.add("bandwidth", Setting::TypeInt) = bandwidth;
+                    }
+                }
+                
+                const char* amp_pos = strstr(body.c_str(), "\"ampfactor\"");
+                if (amp_pos && strstr(amp_pos, ":null") == NULL) {
+                    if (sscanf(amp_pos, "\"ampfactor\":%lf", &ampfactor) == 1 && ampfactor != 1.0) {
+                        new_channel.add("ampfactor", Setting::TypeFloat) = ampfactor;
+                    }
+                }
+                
+                const char* sq_pos = strstr(body.c_str(), "\"squelch_threshold\"");
+                if (sq_pos && strstr(sq_pos, ":null") == NULL) {
+                    if (sscanf(sq_pos, "\"squelch_threshold\":%lf", &squelch_threshold) == 1 && squelch_threshold != 0) {
+                        new_channel.add("squelch_threshold", Setting::TypeInt) = (int)squelch_threshold;
+                    }
+                }
+                
+                const char* snr_pos = strstr(body.c_str(), "\"squelch_snr_threshold\"");
+                if (snr_pos && strstr(snr_pos, ":null") == NULL) {
+                    if (sscanf(snr_pos, "\"squelch_snr_threshold\":%lf", &squelch_snr_threshold) == 1 && squelch_snr_threshold != 0) {
+                        new_channel.add("squelch_snr_threshold", Setting::TypeFloat) = squelch_snr_threshold;
+                    }
+                }
+                
+                const char* afc_pos = strstr(body.c_str(), "\"afc\"");
+                if (afc_pos && strstr(afc_pos, ":null") == NULL) {
+                    if (sscanf(afc_pos, "\"afc\":%d", &afc) == 1 && afc > 0) {
+                        new_channel.add("afc", Setting::TypeInt) = afc;
+                    }
+                }
+                
+                const char* notch_pos = strstr(body.c_str(), "\"notch\"");
+                if (notch_pos && strstr(notch_pos, ":null") == NULL) {
+                    if (sscanf(notch_pos, "\"notch\":%lf", &notch) == 1 && notch > 0) {
+                        new_channel.add("notch", Setting::TypeFloat) = notch;
+                    }
+                }
+                
+                const char* notchq_pos = strstr(body.c_str(), "\"notch_q\"");
+                if (notchq_pos && strstr(notchq_pos, ":null") == NULL) {
+                    if (sscanf(notchq_pos, "\"notch_q\":%lf", &notch_q) == 1 && notch_q != 10.0) {
+                        new_channel.add("notch_q", Setting::TypeFloat) = notch_q;
+                    }
+                }
+                
+                const char* ctcss_pos = strstr(body.c_str(), "\"ctcss\"");
+                if (ctcss_pos && strstr(ctcss_pos, ":null") == NULL) {
+                    if (sscanf(ctcss_pos, "\"ctcss\":%lf", &ctcss) == 1 && ctcss > 0) {
+                        new_channel.add("ctcss", Setting::TypeFloat) = ctcss;
+                    }
+                }
+                
+                // Parse enabled
+                const char* enabled_pos = strstr(body.c_str(), "\"enabled\"");
+                if (enabled_pos && strstr(enabled_pos, ":false") != NULL) {
+                    new_channel.add("disable", Setting::TypeBoolean) = true;
+                }
+                
+                // Add outputs - create a basic file output if outputs array exists
+                const char* outputs_pos = strstr(body.c_str(), "\"outputs\"");
+                if (outputs_pos) {
+                    new_channel.add("outputs", Setting::TypeList);
+                    // For now, add a placeholder - full output parsing would be more complex
+                    // The frontend should send complete output configuration
+                } else {
+                    // Add default file output
+                    Setting& outputs = new_channel.add("outputs", Setting::TypeList);
+                    Setting& file_out = outputs.add(Setting::TypeGroup);
+                    file_out.add("type", Setting::TypeString) = "file";
+                    file_out.add("directory", Setting::TypeString) = "recordings";
+                    file_out.add("filename_template", Setting::TypeString) = "${label}_${start:%Y%m%d}_${start:%H}.mp3";
+                }
+                
+                // Write config back to file
+                config.writeFile(config_path);
+                log(LOG_INFO, "New channel added to device %d in config file\n", device_idx);
+                send_json_response(client_fd, "{\"status\":\"success\",\"message\":\"Channel added successfully. Click 'Apply Changes' to reload.\"}");
+            } catch (const FileIOException& fioex) {
+                log(LOG_ERR, "I/O error adding channel: %s\n", fioex.what());
+                send_json_response(client_fd, "{\"status\":\"error\",\"message\":\"I/O error while updating config file\"}");
+            } catch (const ParseException& pex) {
+                log(LOG_ERR, "Parse error adding channel: %s\n", pex.what());
+                send_json_response(client_fd, "{\"status\":\"error\",\"message\":\"Parse error in config file\"}");
+            } catch (const std::exception& ex) {
+                log(LOG_ERR, "Error adding channel: %s\n", ex.what());
+                send_json_response(client_fd, "{\"status\":\"error\",\"message\":\"Error adding channel\"}");
+            }
         } else {
             // Parse device and channel from path like /api/channels/0/1
             int device_idx = -1, channel_idx = -1;
@@ -758,8 +958,318 @@ static void handle_api_request(int client_fd, const char* path, const char* meth
                     // Get specific channel
                     send_json_response(client_fd, "{\"status\":\"success\"}");
                 } else if (strcmp(method, "PUT") == 0) {
-                    // Update channel
-                    send_json_response(client_fd, "{\"status\":\"success\",\"message\":\"Channel updated. Restart required.\"}");
+                    // Update channel - read JSON body and save to config
+                    if (content_length == 0 || content_length > 10240) {
+                        send_error(client_fd, 400, "Invalid request body");
+                        return;
+                    }
+                    
+                    string body = read_request_body(client_fd, content_length);
+                    if (body.empty()) {
+                        send_error(client_fd, 400, "Empty request body");
+                        return;
+                    }
+                    
+                    const char* config_path = web_server_get_config_path();
+                    try {
+                        Config config;
+                        config.readFile(config_path);
+                        Setting& root = config.getRoot();
+                        
+                        if (!root.exists("devices") || device_idx < 0 || device_idx >= root["devices"].getLength()) {
+                            send_json_response(client_fd, "{\"status\":\"error\",\"message\":\"Invalid device index\"}");
+                            return;
+                        }
+                        
+                        Setting& dev = root["devices"][device_idx];
+                        if (!dev.exists("channels") || channel_idx < 0 || channel_idx >= dev["channels"].getLength()) {
+                            send_json_response(client_fd, "{\"status\":\"error\",\"message\":\"Invalid channel index\"}");
+                            return;
+                        }
+                        
+                        Setting& channel = dev["channels"][channel_idx];
+                        
+                        // Parse JSON and update channel settings
+                        // Simple JSON parsing - extract key values
+                        char label[256] = {0};
+                        double freq = 0;
+                        char modulation[16] = {0};
+                        int highpass = -1, lowpass = -1, bandwidth = 0, afc = 0;
+                        double ampfactor = 1.0, squelch_threshold = 0, squelch_snr_threshold = 0;
+                        double notch = 0, notch_q = 10.0, ctcss = 0;
+                        
+                        // Parse label
+                        const char* label_pos = strstr(body.c_str(), "\"label\"");
+                        if (label_pos && sscanf(label_pos, "\"label\":\"%255[^\"]\"", label) == 1) {
+                            if (channel.exists("label")) channel["label"] = label;
+                            else channel.add("label", Setting::TypeString) = label;
+                        }
+                        
+                        // Parse frequency
+                        const char* freq_pos = strstr(body.c_str(), "\"freq\"");
+                        if (freq_pos && sscanf(freq_pos, "\"freq\":%lf", &freq) == 1) {
+                            if (dev.exists("mode") && strcmp(dev["mode"], "scan") == 0) {
+                                // Scan mode - update freqs array
+                                if (channel.exists("freqs") && channel["freqs"].getLength() > 0) {
+                                    channel["freqs"][0] = (int)(freq * 1000000);
+                                }
+                            } else {
+                                // Multichannel mode
+                                if (channel.exists("freq")) channel["freq"] = (int)(freq * 1000000);
+                                else channel.add("freq", Setting::TypeInt) = (int)(freq * 1000000);
+                            }
+                        }
+                        
+                        // Parse modulation
+                        const char* mod_pos = strstr(body.c_str(), "\"modulation\"");
+                        if (mod_pos && sscanf(mod_pos, "\"modulation\":\"%15[^\"]\"", modulation) == 1) {
+                            if (channel.exists("modulation")) channel["modulation"] = modulation;
+                            else channel.add("modulation", Setting::TypeString) = modulation;
+                        }
+                        
+                        // Parse highpass - remove if -1 or 0, update if > 0
+                        const char* hp_pos = strstr(body.c_str(), "\"highpass\"");
+                        if (hp_pos) {
+                            if (sscanf(hp_pos, "\"highpass\":%d", &highpass) == 1) {
+                                if (highpass > 0) {
+                                    if (channel.exists("highpass")) channel["highpass"] = highpass;
+                                    else channel.add("highpass", Setting::TypeInt) = highpass;
+                                } else {
+                                    // Remove if blanked out (0 or -1)
+                                    if (channel.exists("highpass")) {
+                                        channel.remove("highpass");
+                                    }
+                                }
+                            } else if (strstr(hp_pos, ":null") != NULL) {
+                                // Explicitly null - remove it
+                                if (channel.exists("highpass")) {
+                                    channel.remove("highpass");
+                                }
+                            }
+                        }
+                        
+                        // Parse lowpass - remove if -1 or 0, update if > 0
+                        const char* lp_pos = strstr(body.c_str(), "\"lowpass\"");
+                        if (lp_pos) {
+                            if (sscanf(lp_pos, "\"lowpass\":%d", &lowpass) == 1) {
+                                if (lowpass > 0) {
+                                    if (channel.exists("lowpass")) channel["lowpass"] = lowpass;
+                                    else channel.add("lowpass", Setting::TypeInt) = lowpass;
+                                } else {
+                                    // Remove if blanked out (0 or -1)
+                                    if (channel.exists("lowpass")) {
+                                        channel.remove("lowpass");
+                                    }
+                                }
+                            } else if (strstr(lp_pos, ":null") != NULL) {
+                                // Explicitly null - remove it
+                                if (channel.exists("lowpass")) {
+                                    channel.remove("lowpass");
+                                }
+                            }
+                        }
+                        
+                        // Parse bandwidth - remove if 0, update if > 0
+                        const char* bw_pos = strstr(body.c_str(), "\"bandwidth\"");
+                        if (bw_pos) {
+                            if (sscanf(bw_pos, "\"bandwidth\":%d", &bandwidth) == 1) {
+                                if (bandwidth > 0) {
+                                    if (channel.exists("bandwidth")) channel["bandwidth"] = bandwidth;
+                                    else channel.add("bandwidth", Setting::TypeInt) = bandwidth;
+                                } else {
+                                    // Remove if blanked out (0)
+                                    if (channel.exists("bandwidth")) {
+                                        channel.remove("bandwidth");
+                                    }
+                                }
+                            } else if (strstr(bw_pos, ":null") != NULL) {
+                                // Explicitly null - remove it
+                                if (channel.exists("bandwidth")) {
+                                    channel.remove("bandwidth");
+                                }
+                            }
+                        }
+                        
+                        // Parse ampfactor - only update if explicitly set (not default 1.0)
+                        const char* amp_pos = strstr(body.c_str(), "\"ampfactor\"");
+                        if (amp_pos) {
+                            if (sscanf(amp_pos, "\"ampfactor\":%lf", &ampfactor) == 1) {
+                                if (ampfactor != 1.0) {
+                                    if (channel.exists("ampfactor")) channel["ampfactor"] = ampfactor;
+                                    else channel.add("ampfactor", Setting::TypeFloat) = ampfactor;
+                                } else {
+                                    // Remove if set to default (1.0)
+                                    if (channel.exists("ampfactor")) {
+                                        channel.remove("ampfactor");
+                                    }
+                                }
+                            } else if (strstr(amp_pos, ":null") != NULL) {
+                                // Explicitly null - remove it
+                                if (channel.exists("ampfactor")) {
+                                    channel.remove("ampfactor");
+                                }
+                            }
+                        }
+                        
+                        // Parse squelch_threshold - remove if 0 or null
+                        const char* sq_pos = strstr(body.c_str(), "\"squelch_threshold\"");
+                        if (sq_pos) {
+                            if (sscanf(sq_pos, "\"squelch_threshold\":%lf", &squelch_threshold) == 1) {
+                                if (squelch_threshold != 0) {
+                                    if (channel.exists("squelch_threshold")) channel["squelch_threshold"] = (int)squelch_threshold;
+                                    else channel.add("squelch_threshold", Setting::TypeInt) = (int)squelch_threshold;
+                                } else {
+                                    // Remove if blanked out (0)
+                                    if (channel.exists("squelch_threshold")) {
+                                        channel.remove("squelch_threshold");
+                                    }
+                                }
+                            } else if (strstr(sq_pos, ":null") != NULL) {
+                                // Explicitly null - remove it
+                                if (channel.exists("squelch_threshold")) {
+                                    channel.remove("squelch_threshold");
+                                }
+                            }
+                        }
+                        
+                        // Parse squelch_snr_threshold - remove if 0 or null
+                        const char* snr_pos = strstr(body.c_str(), "\"squelch_snr_threshold\"");
+                        if (snr_pos) {
+                            if (sscanf(snr_pos, "\"squelch_snr_threshold\":%lf", &squelch_snr_threshold) == 1) {
+                                if (squelch_snr_threshold != 0) {
+                                    if (channel.exists("squelch_snr_threshold")) channel["squelch_snr_threshold"] = squelch_snr_threshold;
+                                    else channel.add("squelch_snr_threshold", Setting::TypeFloat) = squelch_snr_threshold;
+                                } else {
+                                    // Remove if blanked out (0)
+                                    if (channel.exists("squelch_snr_threshold")) {
+                                        channel.remove("squelch_snr_threshold");
+                                    }
+                                }
+                            } else if (strstr(snr_pos, ":null") != NULL) {
+                                // Explicitly null - remove it
+                                if (channel.exists("squelch_snr_threshold")) {
+                                    channel.remove("squelch_snr_threshold");
+                                }
+                            }
+                        }
+                        
+                        // Parse afc - remove if 0 (disabled), update if > 0
+                        const char* afc_pos = strstr(body.c_str(), "\"afc\"");
+                        if (afc_pos) {
+                            if (sscanf(afc_pos, "\"afc\":%d", &afc) == 1) {
+                                if (afc > 0) {
+                                    if (channel.exists("afc")) channel["afc"] = afc;
+                                    else channel.add("afc", Setting::TypeInt) = afc;
+                                } else {
+                                    // Remove if disabled (0)
+                                    if (channel.exists("afc")) {
+                                        channel.remove("afc");
+                                    }
+                                }
+                            } else if (strstr(afc_pos, ":null") != NULL) {
+                                // Explicitly null - remove it
+                                if (channel.exists("afc")) {
+                                    channel.remove("afc");
+                                }
+                            }
+                        }
+                        
+                        // Parse notch - remove if 0 or null, update if > 0
+                        const char* notch_pos = strstr(body.c_str(), "\"notch\"");
+                        if (notch_pos) {
+                            if (sscanf(notch_pos, "\"notch\":%lf", &notch) == 1) {
+                                if (notch > 0) {
+                                    if (channel.exists("notch")) channel["notch"] = notch;
+                                    else channel.add("notch", Setting::TypeFloat) = notch;
+                                } else {
+                                    // Remove if blanked out (0)
+                                    if (channel.exists("notch")) {
+                                        channel.remove("notch");
+                                    }
+                                }
+                            } else if (strstr(notch_pos, ":null") != NULL) {
+                                // Explicitly null - remove it
+                                if (channel.exists("notch")) {
+                                    channel.remove("notch");
+                                }
+                            }
+                        }
+                        
+                        // Parse notch_q - remove if default (10.0) or null
+                        const char* notchq_pos = strstr(body.c_str(), "\"notch_q\"");
+                        if (notchq_pos) {
+                            if (sscanf(notchq_pos, "\"notch_q\":%lf", &notch_q) == 1) {
+                                if (notch_q != 10.0) {
+                                    if (channel.exists("notch_q")) channel["notch_q"] = notch_q;
+                                    else channel.add("notch_q", Setting::TypeFloat) = notch_q;
+                                } else {
+                                    // Remove if set to default (10.0)
+                                    if (channel.exists("notch_q")) {
+                                        channel.remove("notch_q");
+                                    }
+                                }
+                            } else if (strstr(notchq_pos, ":null") != NULL) {
+                                // Explicitly null - remove it
+                                if (channel.exists("notch_q")) {
+                                    channel.remove("notch_q");
+                                }
+                            }
+                        }
+                        
+                        // Parse ctcss - remove if 0 or null, update if > 0
+                        const char* ctcss_pos = strstr(body.c_str(), "\"ctcss\"");
+                        if (ctcss_pos) {
+                            if (sscanf(ctcss_pos, "\"ctcss\":%lf", &ctcss) == 1) {
+                                if (ctcss > 0) {
+                                    if (channel.exists("ctcss")) channel["ctcss"] = ctcss;
+                                    else channel.add("ctcss", Setting::TypeFloat) = ctcss;
+                                } else {
+                                    // Remove if blanked out (0)
+                                    if (channel.exists("ctcss")) {
+                                        channel.remove("ctcss");
+                                    }
+                                }
+                            } else if (strstr(ctcss_pos, ":null") != NULL) {
+                                // Explicitly null - remove it
+                                if (channel.exists("ctcss")) {
+                                    channel.remove("ctcss");
+                                }
+                            }
+                        }
+                        
+                        // Parse enabled/disable
+                        const char* enabled_pos = strstr(body.c_str(), "\"enabled\"");
+                        if (enabled_pos) {
+                            bool is_enabled = (strstr(enabled_pos, ":true") != NULL);
+                            if (channel.exists("disable")) {
+                                channel["disable"] = !is_enabled;
+                            } else if (!is_enabled) {
+                                channel.add("disable", Setting::TypeBoolean) = true;
+                            }
+                        }
+                        
+                        // Parse outputs - this is more complex, need to handle array
+                        // For now, we'll update outputs if they exist in the JSON
+                        const char* outputs_pos = strstr(body.c_str(), "\"outputs\"");
+                        if (outputs_pos && channel.exists("outputs")) {
+                            // Outputs parsing would be more complex - for now, we'll leave it
+                            // The outputs structure is complex with nested objects
+                        }
+                        
+                        // Write config back to file
+                        config.writeFile(config_path);
+                        log(LOG_INFO, "Channel %d/%d updated in config file\n", device_idx, channel_idx);
+                        send_json_response(client_fd, "{\"status\":\"success\",\"message\":\"Channel updated successfully. Click 'Apply Changes' to reload.\"}");
+                    } catch (const FileIOException& fioex) {
+                        log(LOG_ERR, "I/O error updating channel: %s\n", fioex.what());
+                        send_json_response(client_fd, "{\"status\":\"error\",\"message\":\"I/O error while updating config file\"}");
+                    } catch (const ParseException& pex) {
+                        log(LOG_ERR, "Parse error updating channel: %s\n", pex.what());
+                        send_json_response(client_fd, "{\"status\":\"error\",\"message\":\"Parse error in config file\"}");
+                    } catch (const std::exception& ex) {
+                        log(LOG_ERR, "Error updating channel: %s\n", ex.what());
+                        send_json_response(client_fd, "{\"status\":\"error\",\"message\":\"Error updating channel\"}");
+                    }
                 } else if (strcmp(method, "DELETE") == 0) {
                     // Delete channel - set disable = true in config
                     const char* config_path = web_server_get_config_path();
@@ -1038,6 +1548,8 @@ void* web_server_thread(void* params) {
     pthread_cond_signal(&server_bind_cond);
     pthread_mutex_unlock(&server_bind_mutex);
     
+    log(LOG_INFO, "Web server entering main loop, waiting for connections on port %d...\n", port);
+    
     while (server_running && !do_exit) {
         fd_set readfds;
         FD_ZERO(&readfds);
@@ -1056,7 +1568,17 @@ void* web_server_thread(void* params) {
             
             if (client_fd >= 0) {
                 handle_client(client_fd);
+            } else {
+                if (errno != EAGAIN && errno != EWOULDBLOCK) {
+                    log(LOG_WARNING, "accept() failed: %s\n", strerror(errno));
+                }
             }
+        }
+        
+        // Check for errors on select
+        if (activity < 0 && errno != EINTR) {
+            log(LOG_ERR, "select() error in web server: %s\n", strerror(errno));
+            break;
         }
     }
     

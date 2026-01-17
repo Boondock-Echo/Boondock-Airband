@@ -115,11 +115,7 @@ This uses the Broadcom VideoCore GPU for FFT calculations, which can significant
 
 ```bash
 mkdir build && cd build
-cmake .. \
-    -DCMAKE_BUILD_TYPE=Release \
-    -DPLATFORM=rpiv2 \
-    -DNFM=ON \
-    -DRTLSDR=ON
+cmake .. -DCMAKE_BUILD_TYPE=Release -DPLATFORM=rpiv2 -DNFM=ON -DRTLSDR=ON
 make -j$(nproc)
 ```
 

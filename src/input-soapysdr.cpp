@@ -22,6 +22,8 @@
 #include <SoapySDR/Device.h>   // SoapySDRDevice, SoapySDRDevice_makeStrArgs
 #include <SoapySDR/Formats.h>  // SOAPY_SDR_CS constants
 #include <SoapySDR/Version.h>  // SOAPY_SDR_API_VERSION
+#include <SoapySDR/Errors.h>   // SOAPY_SDR_TIMEOUT, SOAPY_SDR_OVERFLOW, SOAPY_SDR_UNDERFLOW
+#include <unistd.h>            // usleep
 #include <assert.h>
 #include <limits.h>  // SCHAR_MAX, SHRT_MAX
 #include <math.h>    // round
@@ -273,6 +275,45 @@ int soapysdr_init(input_t* const input) {
     return 0;
 }
 
+// Helper function to reconnect SoapySDR device
+static bool soapysdr_reconnect_device(input_t* input, soapysdr_dev_data_t* dev_data) {
+    log(LOG_WARNING, "SoapySDR device '%s': attempting reconnection after %d consecutive timeouts\n", 
+        dev_data->device_string, dev_data->consecutive_timeouts);
+    
+    // Close existing device
+    if (dev_data->dev != NULL) {
+        SoapySDRDevice_unmake(dev_data->dev);
+        dev_data->dev = NULL;
+    }
+    
+    // Wait before reconnection attempt (exponential backoff)
+    if (dev_data->reconnect_delay_ms > 0) {
+        log(LOG_INFO, "SoapySDR device '%s': waiting %d ms before reconnection attempt\n", 
+            dev_data->device_string, dev_data->reconnect_delay_ms);
+        usleep(dev_data->reconnect_delay_ms * 1000);
+        
+        // Increase delay for next time (exponential backoff, capped at max)
+        dev_data->reconnect_delay_ms = (dev_data->reconnect_delay_ms * 2);
+        if (dev_data->reconnect_delay_ms > SOAPYSDR_MAX_RECONNECT_DELAY_MS) {
+            dev_data->reconnect_delay_ms = SOAPYSDR_MAX_RECONNECT_DELAY_MS;
+        }
+    }
+    
+    // Reinitialize device
+    if (soapysdr_init(input) != 0) {
+        log(LOG_ERR, "SoapySDR device '%s': reinitialization failed\n", dev_data->device_string);
+        return false;
+    }
+    
+    // Reset timeout counter on successful reconnection
+    dev_data->consecutive_timeouts = 0;
+    dev_data->timeout_log_counter = 0;
+    dev_data->reconnect_delay_ms = SOAPYSDR_RECONNECT_DELAY_MS;
+    
+    log(LOG_NOTICE, "SoapySDR device '%s': reconnected successfully\n", dev_data->device_string);
+    return true;
+}
+
 void* soapysdr_rx_thread(void* ctx) {
     input_t* input = (input_t*)ctx;
     soapysdr_dev_data_t* dev_data = (soapysdr_dev_data_t*)input->dev_data;
@@ -306,16 +347,127 @@ void* soapysdr_rx_thread(void* ctx) {
         int flags;             // flags set by receive operation
         long long timeNs;      // timestamp for receive buffer
         int samples_read = SoapySDRDevice_readStream(sdr, rxStream, bufs, num_elems, &flags, &timeNs, SOAPYSDR_READSTREAM_TIMEOUT_US);
+        
         if (samples_read < 0) {  // when it's negative, it's the error code
-            log(LOG_ERR, "SoapySDR device '%s': readStream failed: %s\n", dev_data->device_string, SoapySDR_errToStr(samples_read));
+            const char* error_str = SoapySDR_errToStr(samples_read);
+            
+            // Check if it's a timeout or other recoverable error
+            // SOAPY_SDR_TIMEOUT = -1, SOAPY_SDR_OVERFLOW = -4, SOAPY_SDR_UNDERFLOW = -5
+            // Use numeric values in case constants aren't available
+            bool is_recoverable_error = (samples_read == -1 || samples_read == -4 || samples_read == -5);
+#ifdef SOAPY_SDR_TIMEOUT
+            is_recoverable_error = is_recoverable_error || (samples_read == SOAPY_SDR_TIMEOUT);
+#endif
+#ifdef SOAPY_SDR_OVERFLOW
+            is_recoverable_error = is_recoverable_error || (samples_read == SOAPY_SDR_OVERFLOW);
+#endif
+#ifdef SOAPY_SDR_UNDERFLOW
+            is_recoverable_error = is_recoverable_error || (samples_read == SOAPY_SDR_UNDERFLOW);
+#endif
+            
+            if (is_recoverable_error) {
+                dev_data->consecutive_timeouts++;
+                dev_data->timeout_log_counter++;
+                
+                // Only log timeouts periodically to reduce log spam, or when approaching threshold
+                bool should_log = (dev_data->timeout_log_counter % SOAPYSDR_TIMEOUT_LOG_INTERVAL == 0) ||
+                                  (dev_data->consecutive_timeouts == 1) ||
+                                  (dev_data->consecutive_timeouts >= SOAPYSDR_MAX_CONSECUTIVE_TIMEOUTS - 5);
+                
+                if (should_log) {
+                    if (dev_data->consecutive_timeouts == 1) {
+                        log(LOG_WARNING, "SoapySDR device '%s': timeout detected (%s), will reconnect after %d consecutive timeouts\n", 
+                            dev_data->device_string, error_str, SOAPYSDR_MAX_CONSECUTIVE_TIMEOUTS);
+                    } else if (dev_data->consecutive_timeouts >= SOAPYSDR_MAX_CONSECUTIVE_TIMEOUTS - 5) {
+                        log(LOG_WARNING, "SoapySDR device '%s': %d consecutive timeouts (approaching reconnection threshold of %d)\n", 
+                            dev_data->device_string, dev_data->consecutive_timeouts, SOAPYSDR_MAX_CONSECUTIVE_TIMEOUTS);
+                    } else {
+                        log(LOG_DEBUG, "SoapySDR device '%s': timeout %d/%d (%s)\n", 
+                            dev_data->device_string, dev_data->consecutive_timeouts, SOAPYSDR_MAX_CONSECUTIVE_TIMEOUTS, error_str);
+                    }
+                }
+                
+                // If we've hit too many consecutive timeouts, attempt reconnection
+                if (dev_data->consecutive_timeouts >= SOAPYSDR_MAX_CONSECUTIVE_TIMEOUTS) {
+                    log(LOG_WARNING, "SoapySDR device '%s': %d consecutive timeouts, attempting device reconnection\n", 
+                        dev_data->device_string, dev_data->consecutive_timeouts);
+                    
+                    // Deactivate and close stream before reconnection
+                    SoapySDRDevice_deactivateStream(sdr, rxStream, 0, 0);
+                    SoapySDRDevice_closeStream(sdr, rxStream);
+                    rxStream = NULL;
+                    
+                    // Attempt reconnection
+                    if (!soapysdr_reconnect_device(input, dev_data)) {
+                        log(LOG_ERR, "SoapySDR device '%s': reconnection failed, marking as failed\n", dev_data->device_string);
+                        input->state = INPUT_FAILED;
+                        break;
+                    }
+                    
+                    // Get new device handle
+                    sdr = dev_data->dev;
+                    if (sdr == NULL) {
+                        log(LOG_ERR, "SoapySDR device '%s': device handle is NULL after reconnection\n", dev_data->device_string);
+                        input->state = INPUT_FAILED;
+                        break;
+                    }
+                    
+                    // Recreate stream
+#if SOAPY_SDR_API_VERSION < 0x00080000
+                    if (SoapySDRDevice_setupStream(sdr, &rxStream, SOAPY_SDR_RX, dev_data->sample_format, &dev_data->channel, 1, NULL) != 0) {
+#else
+                    if ((rxStream = SoapySDRDevice_setupStream(sdr, SOAPY_SDR_RX, dev_data->sample_format, &dev_data->channel, 1, NULL)) == NULL) {
+#endif /* SOAPY_SDR_API_VERSION */
+                        log(LOG_ERR, "SoapySDR device '%s': failed to recreate stream after reconnection: %s\n", 
+                            dev_data->device_string, SoapySDRDevice_lastError());
+                        input->state = INPUT_FAILED;
+                        break;
+                    }
+                    
+                    if (SoapySDRDevice_activateStream(sdr, rxStream, 0, 0, 0)) {
+                        log(LOG_ERR, "SoapySDR device '%s': failed to activate stream after reconnection: %s\n", 
+                            dev_data->device_string, SoapySDRDevice_lastError());
+                        input->state = INPUT_FAILED;
+                        break;
+                    }
+                    
+                    log(LOG_NOTICE, "SoapySDR device '%s': stream recreated and reactivated\n", dev_data->device_string);
+                    dev_data->timeout_log_counter = 0;  // Reset log counter after reconnection
+                }
+            } else {
+                // For non-timeout errors, log and reset the counter (might be transient)
+                log(LOG_ERR, "SoapySDR device '%s': readStream failed: %s\n", dev_data->device_string, error_str);
+                if (dev_data->consecutive_timeouts > 0) {
+                    log(LOG_INFO, "SoapySDR device '%s': non-timeout error, resetting timeout counter\n", dev_data->device_string);
+                    dev_data->consecutive_timeouts = 0;
+                    dev_data->timeout_log_counter = 0;
+                }
+            }
             continue;
         }
+        
+        // Successfully read samples - reset timeout counter
+        if (dev_data->consecutive_timeouts > 0) {
+            if (dev_data->consecutive_timeouts > 1) {
+                log(LOG_INFO, "SoapySDR device '%s': recovered after %d timeouts\n", 
+                    dev_data->device_string, dev_data->consecutive_timeouts);
+            }
+            dev_data->consecutive_timeouts = 0;
+            dev_data->timeout_log_counter = 0;
+            dev_data->reconnect_delay_ms = SOAPYSDR_RECONNECT_DELAY_MS;  // Reset backoff delay
+        }
+        
         circbuffer_append(input, buf, (size_t)(samples_read * 2 * input->bytes_per_sample));
     }
 cleanup:
-    SoapySDRDevice_deactivateStream(sdr, rxStream, 0, 0);
-    SoapySDRDevice_closeStream(sdr, rxStream);
-    SoapySDRDevice_unmake(sdr);
+    if (rxStream != NULL) {
+        SoapySDRDevice_deactivateStream(sdr, rxStream, 0, 0);
+        SoapySDRDevice_closeStream(sdr, rxStream);
+    }
+    if (dev_data->dev != NULL) {
+        SoapySDRDevice_unmake(dev_data->dev);
+        dev_data->dev = NULL;
+    }
     return 0;
 }
 
@@ -337,6 +489,9 @@ MODULE_EXPORT input_t* soapysdr_input_new() {
     memset(&dev_data->gains, 0, sizeof(dev_data->gains));
     dev_data->channel = 0;
     dev_data->antenna = NULL;
+    dev_data->consecutive_timeouts = 0;
+    dev_data->reconnect_delay_ms = SOAPYSDR_RECONNECT_DELAY_MS;
+    dev_data->timeout_log_counter = 0;
     /*	return &( input_t ){
                     .dev_data = dev_data,
                     .state = INPUT_UNKNOWN,
