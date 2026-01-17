@@ -370,6 +370,122 @@ static const char* get_html_content() {
         return html_content;
     }
     
+    return NULL;
+}
+
+// CSS content for web interface - read from file
+static const char* get_css_content() {
+    static char* css_content = NULL;
+    static size_t css_size = 0;
+    
+    if (css_content != NULL) {
+        return css_content;
+    }
+    
+    // Try to read from file in source directory or current directory
+    const char* paths[] = {
+        "src/web_ui.css",
+        "web_ui.css",
+        "/usr/local/share/boondock_airband/web_ui.css",
+        "/opt/boondock/airband/src/web_ui.css",
+        NULL
+    };
+    
+    FILE* f = NULL;
+    for (int i = 0; paths[i] != NULL; i++) {
+        f = fopen(paths[i], "r");
+        if (f) break;
+    }
+    
+    if (f) {
+        fseek(f, 0, SEEK_END);
+        css_size = ftell(f);
+        fseek(f, 0, SEEK_SET);
+        css_content = (char*)XCALLOC(css_size + 1, sizeof(char));
+        size_t read = fread(css_content, 1, css_size, f);
+        css_content[read] = '\0';
+        fclose(f);
+        return css_content;
+    }
+    
+    return NULL;
+}
+
+// JavaScript content for web interface - read from file
+static const char* get_js_content() {
+    static char* js_content = NULL;
+    static size_t js_size = 0;
+    
+    if (js_content != NULL) {
+        return js_content;
+    }
+    
+    // Try to read from file in source directory or current directory
+    const char* paths[] = {
+        "src/web_ui.js",
+        "web_ui.js",
+        "/usr/local/share/boondock_airband/web_ui.js",
+        "/opt/boondock/airband/src/web_ui.js",
+        NULL
+    };
+    
+    FILE* f = NULL;
+    for (int i = 0; paths[i] != NULL; i++) {
+        f = fopen(paths[i], "r");
+        if (f) break;
+    }
+    
+    if (f) {
+        fseek(f, 0, SEEK_END);
+        js_size = ftell(f);
+        fseek(f, 0, SEEK_SET);
+        js_content = (char*)XCALLOC(js_size + 1, sizeof(char));
+        size_t read = fread(js_content, 1, js_size, f);
+        js_content[read] = '\0';
+        fclose(f);
+        return js_content;
+    }
+    
+    return NULL;
+}
+
+// Spectrum analyzer JavaScript content - read from file
+static const char* get_spectrum_js_content() {
+    static char* spectrum_js_content = NULL;
+    static size_t spectrum_js_size = 0;
+    
+    if (spectrum_js_content != NULL) {
+        return spectrum_js_content;
+    }
+    
+    // Try to read from file in source directory or current directory
+    const char* paths[] = {
+        "src/web_spectrum.js",
+        "web_spectrum.js",
+        "/usr/local/share/boondock_airband/web_spectrum.js",
+        "/opt/boondock/airband/src/web_spectrum.js",
+        NULL
+    };
+    
+    FILE* f = NULL;
+    for (int i = 0; paths[i] != NULL; i++) {
+        f = fopen(paths[i], "r");
+        if (f) break;
+    }
+    
+    if (f) {
+        fseek(f, 0, SEEK_END);
+        spectrum_js_size = ftell(f);
+        fseek(f, 0, SEEK_SET);
+        spectrum_js_content = (char*)XCALLOC(spectrum_js_size + 1, sizeof(char));
+        size_t read = fread(spectrum_js_content, 1, spectrum_js_size, f);
+        spectrum_js_content[read] = '\0';
+        fclose(f);
+        return spectrum_js_content;
+    }
+    
+    return NULL;
+    
     // Fallback: return a simple HTML page with embedded JavaScript
     static const char* fallback_html = 
         "<!DOCTYPE html><html><head><title>Boondock Airband</title>"
@@ -1502,7 +1618,35 @@ static void handle_client(int client_fd) {
     } else if (strcmp(path, "/") == 0 || strcmp(path, "/index.html") == 0) {
         // Serve main HTML page
         const char* html = get_html_content();
-        send_file_response(client_fd, "text/html", html);
+        if (html) {
+            send_file_response(client_fd, "text/html", html);
+        } else {
+            send_error(client_fd, 404, "HTML file not found");
+        }
+    } else if (strcmp(path, "/web_ui.css") == 0) {
+        // Serve CSS file
+        const char* css = get_css_content();
+        if (css) {
+            send_file_response(client_fd, "text/css", css);
+        } else {
+            send_error(client_fd, 404, "CSS file not found");
+        }
+    } else if (strcmp(path, "/web_ui.js") == 0) {
+        // Serve JavaScript file
+        const char* js = get_js_content();
+        if (js) {
+            send_file_response(client_fd, "application/javascript", js);
+        } else {
+            send_error(client_fd, 404, "JavaScript file not found");
+        }
+    } else if (strcmp(path, "/web_spectrum.js") == 0) {
+        // Serve spectrum analyzer JavaScript file
+        const char* spectrum_js = get_spectrum_js_content();
+        if (spectrum_js) {
+            send_file_response(client_fd, "application/javascript", spectrum_js);
+        } else {
+            send_error(client_fd, 404, "Spectrum JavaScript file not found");
+        }
     } else if (strncmp(path, "/recordings/", 12) == 0) {
         // Serve recording files - find from device channels
         string path_str = path + 12;
