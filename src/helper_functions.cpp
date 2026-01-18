@@ -41,6 +41,17 @@ bool make_dir(const string& dir_path) {
         return true;
     }
 
+    // Create parent directories first if they don't exist
+    size_t last_slash = dir_path.find_last_of('/');
+    if (last_slash != string::npos && last_slash > 0) {
+        string parent_dir = dir_path.substr(0, last_slash);
+        if (!dir_exists(parent_dir)) {
+            if (!make_dir(parent_dir)) {
+                return false;  // Failed to create parent directory
+            }
+        }
+    }
+
     if (mkdir(dir_path.c_str(), 0755) != 0) {
         log(LOG_ERR, "Could not create directory %s: %s\n", dir_path.c_str(), strerror(errno));
         return false;
@@ -56,17 +67,27 @@ bool make_subdirs(const string& basedir, const string& subdirs) {
         return true;
     }
 
-    // otherwise scan through subdirs for each slash and make each directory.  start with index of 0
-    // to create basedir incase that doesn't exist
-    size_t index = 0;
-    while (index != string::npos) {
-        if (!make_dir(basedir + delim + subdirs.substr(0, index))) {
-            return false;
-        }
-        index = subdirs.find_first_of(delim, index + 1);
+    // First, ensure the base directory exists
+    if (!make_dir(basedir)) {
+        return false;
     }
 
-    make_dir(final_path);
+    // If subdirs is empty, we're done
+    if (subdirs.empty()) {
+        return true;
+    }
+
+    // Otherwise scan through subdirs for each slash and make each directory
+    size_t index = 0;
+    while (index != string::npos) {
+        size_t next_index = subdirs.find_first_of(delim, index + 1);
+        string current_path = basedir + delim + subdirs.substr(0, next_index);
+        if (!make_dir(current_path)) {
+            return false;
+        }
+        index = next_index;
+    }
+
     return dir_exists(final_path);
 }
 

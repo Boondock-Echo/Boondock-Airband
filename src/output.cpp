@@ -551,9 +551,10 @@ static void close_if_necessary(output_t* output) {
     }
 
     // Check if chunk duration has been exceeded
-    // Use a larger buffer (5 seconds) to account for processing delays and ensure files don't exceed the limit
+    // Use a small buffer (1 second) to account for processing delays while ensuring files close close to the target duration
     double duration_sec = delta_sec(&fdata->open_time, &current_time);
-    bool chunk_duration_exceeded = (duration_sec >= (MAX_TRANSMISSION_TIME_SEC - 5.0));
+    // Close when duration reaches or exceeds the chunk duration limit (with 1 second buffer)
+    bool chunk_duration_exceeded = (duration_sec >= (MAX_TRANSMISSION_TIME_SEC - 1.0));
 
     if (start_hour != current_hour || chunk_duration_exceeded) {
         if (chunk_duration_exceeded) {
@@ -705,8 +706,8 @@ void process_outputs(channel_t* channel, int cur_scan_freq) {
                 continue;
             }
 
-            // For continuous recording, check chunk duration before each write
-            if (fdata->continuous && fdata->f) {
+            // Check chunk duration before each write (for both continuous and non-continuous recording)
+            if (fdata->f) {
                 close_if_necessary(&channel->outputs[k]);
                 // If file was closed, we need to open a new one
                 if (!fdata->f) {
@@ -748,9 +749,9 @@ void process_outputs(channel_t* channel, int cur_scan_freq) {
                 written = fwrite(channel->iq_out, 1, buflen, fdata->f);
             }
             
-            // For continuous recording, check chunk duration after write as well
+            // Check chunk duration after write as well (for both continuous and non-continuous recording)
             // This ensures we don't exceed the limit even if the check before write missed it
-            if (fdata->continuous && fdata->f) {
+            if (fdata->f) {
                 close_if_necessary(&channel->outputs[k]);
             }
             if (written < buflen) {

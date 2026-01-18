@@ -20,6 +20,7 @@
 
 #include "web_server.h"
 #include "boondock_airband.h"
+#include "capture_process.h"
 #include "config.h"
 #include <arpa/inet.h>
 #include <cerrno>
@@ -175,6 +176,12 @@ static string get_channels_status_json() {
     std::stringstream json;
     json << "{\"device\":0,\"channels\":[";
     
+    // If capture process is not running, return empty channels
+    if (device_count == 0 || devices == NULL) {
+        json << "]}";
+        return json.str();
+    }
+    
     bool first = true;
     for (int d = 0; d < device_count; d++) {
         device_t* dev = devices + d;
@@ -237,6 +244,12 @@ static string get_channels_status_json() {
 static string get_device_info_json() {
     std::stringstream json;
     json << "{\"devices\":[";
+    
+    // If capture process is not running, return empty devices
+    if (device_count == 0 || devices == NULL) {
+        json << "]}";
+        return json.str();
+    }
     
     for (int d = 0; d < device_count; d++) {
         device_t* dev = devices + d;
@@ -968,6 +981,12 @@ static void handle_api_request(int client_fd, const char* path, const char* meth
         }
     } else if (strncmp(path, "/api/spectrum", 13) == 0) {
         // Spectrum analyzer endpoint: /api/spectrum or /api/spectrum/{device_index}
+        // If capture process is not running, return empty data
+        if (device_count == 0 || devices == NULL) {
+            send_json_response(client_fd, "{\"devices\":[]}");
+            return;
+        }
+        
         int device_idx = -1;
         if (strlen(path) > 13) {
             if (sscanf(path, "/api/spectrum/%d", &device_idx) != 1) {
@@ -1097,25 +1116,35 @@ static void handle_api_request(int client_fd, const char* path, const char* meth
         // Signal restart (set flag, actual restart handled by main thread)
         send_json_response(client_fd, "{\"status\":\"restart_requested\"}");
     } else if (strcmp(path, "/api/capture/stop") == 0 && strcmp(method, "POST") == 0) {
-        // Stop capture process
-        extern volatile int capture_enabled;
-        capture_enabled = 0;
-        log(LOG_INFO, "Capture process stopped via API\n");
-        send_json_response(client_fd, "{\"status\":\"success\",\"message\":\"Capture process stopped\"}");
+        // Stop capture subprocess
+        if (capture_process_stop() == 0) {
+            log(LOG_INFO, "Capture process stopped via API\n");
+            send_json_response(client_fd, "{\"status\":\"success\",\"message\":\"Capture process stopped\"}");
+        } else {
+            log(LOG_ERR, "Failed to stop capture process via API\n");
+            send_json_response(client_fd, "{\"status\":\"error\",\"message\":\"Failed to stop capture process\"}");
+        }
     } else if (strcmp(path, "/api/capture/start") == 0 && strcmp(method, "POST") == 0) {
-        // Start capture process and reload the latest configuration from disk
-        extern volatile int capture_enabled;
-        extern volatile int do_exit;
-        capture_enabled = 1;
-        web_server_trigger_reload();
-        log(LOG_INFO, "Capture start requested via API - reloading configuration\n");
-        send_json_response(client_fd, "{\"status\":\"success\",\"message\":\"Capture process restarting with latest configuration\"}");
-        do_exit = 1;
+        // Start capture subprocess with latest configuration
+        const char* config_path = web_server_get_config_path();
+        pid_t pid = capture_process_start(config_path);
+        if (pid > 0) {
+            log(LOG_INFO, "Capture process started via API (PID: %d)\n", pid);
+            send_json_response(client_fd, "{\"status\":\"success\",\"message\":\"Capture process started with latest configuration\"}");
+        } else {
+            log(LOG_ERR, "Failed to start capture process via API\n");
+            send_json_response(client_fd, "{\"status\":\"error\",\"message\":\"Failed to start capture process\"}");
+        }
     } else if (strcmp(path, "/api/capture/status") == 0 && strcmp(method, "GET") == 0) {
-        // Get capture status
-        extern volatile int capture_enabled;
+        // Get capture subprocess status
+        int is_running = capture_process_is_running();
+        pid_t pid = capture_process_get_pid();
         char response[256];
-        snprintf(response, sizeof(response), "{\"status\":\"success\",\"capture_enabled\":%d}", capture_enabled);
+        if (is_running && pid > 0) {
+            snprintf(response, sizeof(response), "{\"status\":\"success\",\"capture_enabled\":1,\"pid\":%d}", (int)pid);
+        } else {
+            snprintf(response, sizeof(response), "{\"status\":\"success\",\"capture_enabled\":0,\"pid\":0}");
+        }
         send_json_response(client_fd, response);
     // /api/apply endpoint removed - configuration is now applied automatically when starting capture
     } else if (strncmp(path, "/api/channels", 13) == 0) {
@@ -2250,16 +2279,21 @@ static void handle_api_request(int client_fd, const char* path, const char* meth
                     // UDP method
                     bool udp_enabled = false;
                     string udp_address = "127.0.0.1";
+                    bool udp_headers = false;
                     if (root.exists("output_methods") && root["output_methods"].exists("udp")) {
                         udp_enabled = (bool)root["output_methods"]["udp"]["enabled"];
                         if (root["output_methods"]["udp"].exists("default_address")) {
                             udp_address = (const char*)root["output_methods"]["udp"]["default_address"];
                         }
+                        if (root["output_methods"]["udp"].exists("default_headers")) {
+                            udp_headers = (bool)root["output_methods"]["udp"]["default_headers"];
+                        }
                     }
                     if (!first_method) json << ",";
                     first_method = false;
                     json << "\"udp\":{\"enabled\":" << (udp_enabled ? "true" : "false") 
-                         << ",\"default_address\":\"" << udp_address << "\"}";
+                         << ",\"default_address\":\"" << udp_address << "\""
+                         << ",\"default_headers\":" << (udp_headers ? "true" : "false") << "}";
                     
                     // UDP Server method
                     bool udp_server_enabled = false;
@@ -2354,7 +2388,7 @@ static void handle_api_request(int client_fd, const char* path, const char* meth
                     json << "}}";
                     send_json_response(client_fd, json.str().c_str());
                 } catch (const std::exception& e) {
-                    send_json_response(client_fd, "{\"file_chunk_duration_minutes\":60,\"output_methods\":{\"file\":{\"enabled\":true,\"global_recording_directory\":\"recordings\"},\"udp\":{\"enabled\":false,\"default_address\":\"127.0.0.1\"},\"udp_server\":{\"enabled\":false,\"port_start\":6001,\"port_end\":6100},\"boondock_api\":{\"enabled\":false,\"api_url\":\"\",\"api_key\":\"\"},\"redis\":{\"enabled\":false,\"address\":\"127.0.0.1\",\"port\":6379,\"database\":0,\"password\":\"\"},\"icecast\":{\"enabled\":false,\"server\":\"\",\"port\":8000,\"mountpoint\":\"\",\"username\":\"\",\"password\":\"\"}}}");
+                    send_json_response(client_fd, "{\"file_chunk_duration_minutes\":60,\"output_methods\":{\"file\":{\"enabled\":true,\"global_recording_directory\":\"recordings\"},\"udp\":{\"enabled\":false,\"default_address\":\"127.0.0.1\",\"default_headers\":false},\"udp_server\":{\"enabled\":false,\"port_start\":6001,\"port_end\":6100},\"boondock_api\":{\"enabled\":false,\"api_url\":\"\",\"api_key\":\"\"},\"redis\":{\"enabled\":false,\"address\":\"127.0.0.1\",\"port\":6379,\"database\":0,\"password\":\"\"},\"icecast\":{\"enabled\":false,\"server\":\"\",\"port\":8000,\"mountpoint\":\"\",\"username\":\"\",\"password\":\"\"}}}");
                 }
             } else if (strcmp(method, "PUT") == 0) {
                 // Update output settings
@@ -2451,6 +2485,14 @@ static void handle_api_request(int client_fd, const char* path, const char* meth
                                     } else {
                                         udp_method.add("default_address", Setting::TypeString) = udp_address;
                                     }
+                                }
+                                
+                                // Parse default_headers
+                                bool udp_headers = (strstr(udp_pos, "\"default_headers\":true") != NULL);
+                                if (udp_method.exists("default_headers")) {
+                                    udp_method["default_headers"] = udp_headers;
+                                } else {
+                                    udp_method.add("default_headers", Setting::TypeBoolean) = udp_headers;
                                 }
                             }
                             

@@ -680,6 +680,10 @@
                                 <small>Default UDP server address for all channels. Can be overridden per channel.</small>
                             </div>
                             <div class="form-group">
+                                <label><input type="checkbox" id="output-settings-udp-default-headers" name="udp_default_headers"> Default UDP Packet Headers</label>
+                                <small>Default setting for UDP packet headers. When enabled, channels will include metadata (ID, frequency, signal strength, SNR) in UDP packets by default. Can be overridden per channel.</small>
+                            </div>
+                            <div class="form-group">
                                 <label><input type="checkbox" id="output-method-udp-server-enabled" onchange="toggleUdpServerPorts()"> Enable UDP Server Mode</label>
                                 <small>Allow channels to act as UDP servers. When enabled, channels will automatically assign ports from the range below.</small>
                             </div>

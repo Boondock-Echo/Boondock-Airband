@@ -311,6 +311,12 @@ add_library (boondock_airband_base OBJECT
 	mixer.cpp
 	output.cpp
 	boondock_airband.cpp
+	signal_handling.cpp
+	demod_math.cpp
+	demod_init.cpp
+	demodulate.cpp
+	config_utils.cpp
+	capture_process.cpp
 	squelch.cpp
 	ctcss.cpp
 	util.cpp

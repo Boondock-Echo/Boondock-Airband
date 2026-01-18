@@ -1972,7 +1972,10 @@ function editChannel(deviceIdx, channelIdx) {
                         document.getElementById("output-udp-address").value = out.dest_address || "";
                         document.getElementById("output-udp-port").value = out.dest_port || "";
                         document.getElementById("output-udp-continuous").checked = out.continuous || false;
-                        document.getElementById("output-udp-headers").checked = out.udp_headers || false;
+                        // Use channel setting if present, otherwise use global default
+                        var defaultHeaders = document.getElementById("output-settings-udp-default-headers");
+                        var globalDefault = defaultHeaders ? defaultHeaders.checked : false;
+                        document.getElementById("output-udp-headers").checked = (out.udp_headers !== undefined) ? out.udp_headers : globalDefault;
                         document.getElementById("output-udp-chunking").checked = out.udp_chunking !== false; // Default true
                         toggleOutputSection("udp");
                     } else if (out.type === "icecast") {
@@ -2250,13 +2253,23 @@ function saveChannel(event) {
                 udpAddress = defaultUdpAddress.value;
             }
         }
+        // Use global default for headers if not explicitly set
+        var udpHeaders = formData.get("output_udp_headers");
+        if (udpHeaders === null) {
+            // Check global default
+            var defaultHeaders = document.getElementById("output-settings-udp-default-headers");
+            if (defaultHeaders) {
+                udpHeaders = defaultHeaders.checked ? "on" : "off";
+            }
+        }
+        
         channelData.outputs.push({
             type: "udp_stream",
             enabled: true,
             dest_address: udpAddress || "127.0.0.1",
             dest_port: parseInt(formData.get("output_udp_port")) || 6001,
             continuous: formData.get("output_udp_continuous") === "on",
-            udp_headers: formData.get("output_udp_headers") === "on",
+            udp_headers: udpHeaders === "on",
             udp_chunking: formData.get("output_udp_chunking") !== "off" // Default true if not explicitly off
         });
     }
@@ -2675,6 +2688,9 @@ function loadOutputSettings() {
                     if (data.output_methods.udp.default_address) {
                         document.getElementById("output-settings-udp-default-address").value = data.output_methods.udp.default_address;
                     }
+                    if (data.output_methods.udp.default_headers !== undefined) {
+                        document.getElementById("output-settings-udp-default-headers").checked = data.output_methods.udp.default_headers || false;
+                    }
                     toggleOutputMethod("udp");
                 }
                 if (data.output_methods.udp_server !== undefined) {
@@ -2752,7 +2768,8 @@ function saveOutputSettings() {
             },
             udp: {
                 enabled: document.getElementById("output-method-udp-enabled").checked,
-                default_address: document.getElementById("output-settings-udp-default-address").value || "127.0.0.1"
+                default_address: document.getElementById("output-settings-udp-default-address").value || "127.0.0.1",
+                default_headers: document.getElementById("output-settings-udp-default-headers").checked
             },
             udp_server: {
                 enabled: document.getElementById("output-method-udp-server-enabled").checked,

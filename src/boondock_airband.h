@@ -66,6 +66,7 @@
 
 #ifdef NFM
 #define WAVE_RATE 16000
+enum fm_demod_algo { FM_FAST_ATAN2, FM_QUADRI_DEMOD };
 #else
 #define WAVE_RATE 8000
 #endif /* NFM */
@@ -394,13 +395,19 @@ void* output_thread(void* params);
 extern bool use_localtime;
 extern bool multiple_demod_threads;
 extern bool multiple_output_threads;
+extern bool log_scan_activity;
 extern char* stats_filepath;
 extern size_t fft_size, fft_size_log;
 extern int device_count, mixer_count;
+extern int devices_running;
+extern int tui;  // do not display textual user interface
 extern int shout_metadata_delay;
 extern volatile int do_exit, device_opened, do_reload;
 extern volatile int capture_enabled;  // Control flag for capture process (can be stopped/started)
 extern float alpha;
+#ifdef NFM
+extern enum fm_demod_algo fm_demod;
+#endif /* NFM */
 extern int file_chunk_duration_minutes;  // Global file chunking duration (5-60 minutes, default 60)
 extern device_t* devices;
 extern mixer_t* mixers;
