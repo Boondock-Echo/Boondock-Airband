@@ -48,6 +48,10 @@
 #include <fstream>
 #include <mutex>
 #include <algorithm>
+#include <sys/resource.h>
+#include <sys/sysinfo.h>
+#include <sys/statvfs.h>
+#include <fstream>
 
 using namespace std;
 using namespace libconfig;
@@ -59,6 +63,12 @@ static volatile int server_bind_status = 0;  // 0=unknown, 1=success, -1=failed
 static pthread_mutex_t server_bind_mutex = PTHREAD_MUTEX_INITIALIZER;
 static pthread_cond_t server_bind_cond = PTHREAD_COND_INITIALIZER;
 static int server_port = 5000;
+
+// System metrics tracking
+static time_t process_start_time = 0;
+static std::vector<double> cpu_samples;
+static std::vector<double> ram_samples;
+static const size_t MAX_SAMPLES = 60;  // Keep last 60 samples for averaging
 
 // Error storage
 static std::vector<std::string> error_log;
@@ -237,6 +247,254 @@ static string get_channels_status_json() {
     }
     
     json << "]}";
+    return json.str();
+}
+
+// Get system metrics as JSON (uptime, CPU, disk, RAM)
+static string get_system_metrics_json() {
+    std::stringstream json;
+    
+    // Calculate uptime
+    time_t current_time = time(NULL);
+    time_t uptime_seconds = 0;
+    if (process_start_time > 0) {
+        uptime_seconds = current_time - process_start_time;
+    } else {
+        // Try to get process start time from /proc/self/stat
+        std::ifstream stat_file("/proc/self/stat");
+        if (stat_file.is_open()) {
+            std::string line;
+            std::getline(stat_file, line);
+            std::istringstream iss(line);
+            std::string token;
+            // Skip first 21 tokens (PID, comm, state, etc.)
+            for (int i = 0; i < 21 && iss >> token; i++);
+            // 22nd token is starttime (in clock ticks)
+            if (iss >> token) {
+                long long starttime = std::stoll(token);
+                long long clock_ticks = sysconf(_SC_CLK_TCK);
+                if (clock_ticks > 0) {
+                    time_t start_time_sec = current_time - (starttime / clock_ticks);
+                    uptime_seconds = current_time - start_time_sec;
+                }
+            }
+        }
+        if (uptime_seconds == 0) {
+            // Fallback: use current time as start time
+            process_start_time = current_time;
+            uptime_seconds = 0;
+        } else {
+            process_start_time = current_time - uptime_seconds;
+        }
+    }
+    
+    // Get CPU usage from /proc/self/stat
+    double cpu_percent = 0.0;
+    static time_t last_cpu_time = 0;
+    static unsigned long long last_utime = 0;
+    static unsigned long long last_stime = 0;
+    
+    time_t current_cpu_time = time(NULL);
+    std::ifstream stat_file("/proc/self/stat");
+    if (stat_file.is_open()) {
+        std::string line;
+        std::getline(stat_file, line);
+        std::istringstream iss(line);
+        std::string token;
+        // Skip first 13 tokens (PID, comm, state, ppid, etc.)
+        for (int i = 0; i < 13 && iss >> token; i++);
+        // 14th token is utime, 15th is stime (in clock ticks)
+        unsigned long long utime = 0, stime = 0;
+        if (iss >> token) utime = std::stoull(token);
+        if (iss >> token) stime = std::stoull(token);
+        
+        if (last_cpu_time > 0 && current_cpu_time > last_cpu_time) {
+            unsigned long long total_time = (utime + stime) - (last_utime + last_stime);
+            long long clock_ticks = sysconf(_SC_CLK_TCK);
+            if (clock_ticks > 0) {
+                double cpu_time_sec = (double)total_time / clock_ticks;
+                double real_time_sec = current_cpu_time - last_cpu_time;
+                // For multi-threaded processes, CPU usage can exceed 100%
+                // Divide by number of CPU cores to get percentage per core
+                int num_cores = sysconf(_SC_NPROCESSORS_ONLN);
+                if (num_cores > 0 && real_time_sec > 0) {
+                    cpu_percent = (cpu_time_sec / real_time_sec) * 100.0 / num_cores;
+                    cpu_percent = std::min(100.0, std::max(0.0, cpu_percent));
+                }
+            }
+        }
+        last_cpu_time = current_cpu_time;
+        last_utime = utime;
+        last_stime = stime;
+    }
+    
+    // Add to samples for averaging
+    cpu_samples.push_back(cpu_percent);
+    if (cpu_samples.size() > MAX_SAMPLES) {
+        cpu_samples.erase(cpu_samples.begin());
+    }
+    double cpu_avg = 0.0;
+    if (!cpu_samples.empty()) {
+        for (double sample : cpu_samples) {
+            cpu_avg += sample;
+        }
+        cpu_avg /= cpu_samples.size();
+    }
+    
+    // Get CPU temperature (Raspberry Pi)
+    double cpu_temp = 0.0;
+    std::ifstream temp_file("/sys/class/thermal/thermal_zone0/temp");
+    if (temp_file.is_open()) {
+        int temp_millidegrees = 0;
+        if (temp_file >> temp_millidegrees) {
+            cpu_temp = temp_millidegrees / 1000.0;  // Convert from millidegrees to degrees
+        }
+        temp_file.close();
+    }
+    
+    // Get system-wide RAM usage
+    double ram_percent = 0.0;
+    unsigned long long total_ram_bytes = 0;
+    struct sysinfo si;
+    if (sysinfo(&si) == 0) {
+        total_ram_bytes = si.totalram * si.mem_unit;
+        unsigned long long free_ram_bytes = si.freeram * si.mem_unit;
+        unsigned long long used_ram_bytes = total_ram_bytes - free_ram_bytes;
+        
+        if (total_ram_bytes > 0) {
+            ram_percent = (double)used_ram_bytes / total_ram_bytes * 100.0;
+            ram_percent = std::min(100.0, std::max(0.0, ram_percent));
+        }
+    }
+    
+    // Add to samples for averaging
+    ram_samples.push_back(ram_percent);
+    if (ram_samples.size() > MAX_SAMPLES) {
+        ram_samples.erase(ram_samples.begin());
+    }
+    double ram_avg = 0.0;
+    if (!ram_samples.empty()) {
+        for (double sample : ram_samples) {
+            ram_avg += sample;
+        }
+        ram_avg /= ram_samples.size();
+    }
+    
+    // Get disk usage for recordings directory (use filesystem root if recordings dir doesn't exist)
+    unsigned long long disk_used = 0;
+    unsigned long long disk_total = 0;
+    struct statvfs vfs;
+    const char* config_path = web_server_get_config_path();
+    char* exe_dir = strdup(config_path);
+    char* last_slash = strrchr(exe_dir, '/');
+    if (last_slash) *last_slash = '\0';
+    std::string recordings_dir = std::string(exe_dir) + "/recordings";
+    free(exe_dir);
+    
+    // Try recordings directory first, fallback to executable directory, then root
+    const char* dir_to_check = recordings_dir.c_str();
+    char* exe_dir2 = NULL;
+    if (statvfs(dir_to_check, &vfs) != 0) {
+        // Try executable directory
+        const char* config_path2 = web_server_get_config_path();
+        exe_dir2 = strdup(config_path2);
+        char* last_slash2 = strrchr(exe_dir2, '/');
+        if (last_slash2) *last_slash2 = '\0';
+        dir_to_check = exe_dir2;
+        if (statvfs(dir_to_check, &vfs) != 0) {
+            // Fallback to root
+            dir_to_check = "/";
+            statvfs(dir_to_check, &vfs);
+        }
+    }
+    
+    if (statvfs(dir_to_check, &vfs) == 0) {
+        disk_total = (unsigned long long)vfs.f_blocks * vfs.f_frsize;
+        unsigned long long disk_free = (unsigned long long)vfs.f_bavail * vfs.f_frsize;
+        disk_used = disk_total - disk_free;
+    }
+    
+    if (exe_dir2) {
+        free(exe_dir2);
+    }
+    
+    // Count today's recordings (only .mp3 files, recursively search subdirectories)
+    int recordings_count = 0;
+    unsigned long long recordings_size_bytes = 0;
+    time_t today_start = current_time;
+    struct tm* tm_today = localtime(&current_time);
+    tm_today->tm_hour = 0;
+    tm_today->tm_min = 0;
+    tm_today->tm_sec = 0;
+    today_start = mktime(tm_today);
+    
+    // Recursive function to count recordings
+    std::function<void(const std::string&)> count_recordings = [&](const std::string& dir_path) {
+        DIR* dir = opendir(dir_path.c_str());
+        if (!dir) return;
+        
+        struct dirent* entry;
+        while ((entry = readdir(dir)) != NULL) {
+            if (strcmp(entry->d_name, ".") == 0 || strcmp(entry->d_name, "..") == 0) {
+                continue;
+            }
+            
+            std::string full_path = dir_path + "/" + entry->d_name;
+            struct stat st;
+            if (stat(full_path.c_str(), &st) == 0) {
+                if (S_ISDIR(st.st_mode)) {
+                    // Recursively search subdirectories
+                    count_recordings(full_path);
+                } else if (S_ISREG(st.st_mode)) {
+                    // Only count .mp3 files (ignore .txt metadata and .tmp files)
+                    std::string filename = entry->d_name;
+                    if (filename.length() >= 4) {
+                        std::string ext = filename.substr(filename.length() - 4);
+                        // Convert to lowercase for comparison
+                        std::transform(ext.begin(), ext.end(), ext.begin(), ::tolower);
+                        if (ext == ".mp3") {
+                            // Check if file was created today
+                            if (st.st_mtime >= today_start) {
+                                recordings_count++;
+                                recordings_size_bytes += st.st_size;
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        closedir(dir);
+    };
+    
+    count_recordings(recordings_dir);
+    
+    // Format uptime
+    int hours = uptime_seconds / 3600;
+    int minutes = (uptime_seconds % 3600) / 60;
+    int seconds = uptime_seconds % 60;
+    char uptime_str[32];
+    if (hours > 0) {
+        snprintf(uptime_str, sizeof(uptime_str), "%dh %dm %ds", hours, minutes, seconds);
+    } else if (minutes > 0) {
+        snprintf(uptime_str, sizeof(uptime_str), "%dm %ds", minutes, seconds);
+    } else {
+        snprintf(uptime_str, sizeof(uptime_str), "%ds", seconds);
+    }
+    
+    json << std::fixed << std::setprecision(1);
+    json << "{\"uptime\":" << uptime_seconds
+         << ",\"uptime_str\":\"" << uptime_str << "\""
+         << ",\"cpu_usage\":" << cpu_percent
+         << ",\"cpu_avg\":" << cpu_avg
+         << ",\"cpu_temp\":" << cpu_temp
+         << ",\"ram_usage\":" << ram_percent
+         << ",\"ram_avg\":" << ram_avg
+         << ",\"ram_total\":" << total_ram_bytes
+         << ",\"disk_used\":" << disk_used
+         << ",\"disk_total\":" << disk_total
+         << ",\"recordings_count\":" << recordings_count
+         << ",\"recordings_size_bytes\":" << recordings_size_bytes << "}";
+    
     return json.str();
 }
 
@@ -961,6 +1219,9 @@ static void handle_api_request(int client_fd, const char* path, const char* meth
     if (strcmp(path, "/api/status") == 0) {
         string json = get_channels_status_json();
         send_json_response(client_fd, json.c_str());
+    } else if (strcmp(path, "/api/system") == 0) {
+        string json = get_system_metrics_json();
+        send_json_response(client_fd, json.c_str());
     } else if (strcmp(path, "/api/device") == 0) {
         if (strcmp(method, "GET") == 0) {
             // Try to get full device details from config, fallback to runtime info
@@ -1136,12 +1397,23 @@ static void handle_api_request(int client_fd, const char* path, const char* meth
             send_json_response(client_fd, "{\"status\":\"error\",\"message\":\"Failed to start capture process\"}");
         }
     } else if (strcmp(path, "/api/capture/status") == 0 && strcmp(method, "GET") == 0) {
-        // Get capture subprocess status
-        int is_running = capture_process_is_running();
-        pid_t pid = capture_process_get_pid();
+        // Get capture status - check if devices are actually running
+        // In the new architecture, capture runs in the same process as the web server
+        int is_running = 0;
+        if (device_count > 0 && devices != NULL) {
+            // Check if any device is in a running state
+            for (int d = 0; d < device_count; d++) {
+                device_t* dev = devices + d;
+                if (dev->input && dev->input->state == INPUT_RUNNING) {
+                    is_running = 1;
+                    break;
+                }
+            }
+        }
+        
         char response[256];
-        if (is_running && pid > 0) {
-            snprintf(response, sizeof(response), "{\"status\":\"success\",\"capture_enabled\":1,\"pid\":%d}", (int)pid);
+        if (is_running) {
+            snprintf(response, sizeof(response), "{\"status\":\"success\",\"capture_enabled\":1,\"pid\":%d}", (int)getpid());
         } else {
             snprintf(response, sizeof(response), "{\"status\":\"success\",\"capture_enabled\":0,\"pid\":0}");
         }
@@ -3014,6 +3286,11 @@ int web_server_start(int port) {
     if (server_running) {
         return 0;  // Already running
     }
+    
+    // Initialize process start time for uptime calculation
+    process_start_time = time(NULL);
+    cpu_samples.clear();
+    ram_samples.clear();
     
     server_bind_status = 0;  // Reset status
     

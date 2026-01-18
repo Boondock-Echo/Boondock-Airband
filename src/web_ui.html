@@ -26,13 +26,29 @@
             <div class="metrics">
                 <div class="metric">
                     <h3>Today's Recordings</h3>
-                    <div class="value" id="recordings-count">0</div>
-                    <div style="font-size: 10px; color: #aaa; margin-top: 3px;">Uptime: <span id="uptime">0s</span></div>
+                    <div style="display: flex; justify-content: space-between; align-items: center;">
+                        <div>
+                            <div class="value" id="recordings-count">0</div>
+                            <div style="font-size: 10px; color: #aaa; margin-top: 3px;">Uptime: <span id="uptime">0s</span></div>
+                        </div>
+                        <div style="text-align: right;">
+                            <div style="font-size: 10px; color: #aaa; margin-bottom: 2px;">Size</div>
+                            <div style="font-size: 18px; font-weight: bold; color: #4a90e2;" id="recordings-size">0 MB</div>
+                        </div>
+                    </div>
                 </div>
                 <div class="metric">
                     <h3>CPU Usage</h3>
-                    <div class="value" id="cpu-usage">0%</div>
-                    <div style="font-size: 10px; color: #aaa; margin-top: 3px;">Avg: <span id="cpu-avg">0%</span></div>
+                    <div style="display: flex; justify-content: space-between; align-items: center;">
+                        <div>
+                            <div class="value" id="cpu-usage">0%</div>
+                            <div style="font-size: 10px; color: #aaa; margin-top: 3px;">Avg: <span id="cpu-avg">0%</span></div>
+                        </div>
+                        <div style="text-align: right;">
+                            <div style="font-size: 10px; color: #aaa; margin-bottom: 2px;">CPU Temp</div>
+                            <div style="font-size: 18px; font-weight: bold; color: #4a90e2;" id="cpu-temp">--°C</div>
+                        </div>
+                    </div>
                 </div>
                 <div class="metric">
                     <h3>Disk Usage</h3>
@@ -42,7 +58,7 @@
                 <div class="metric">
                     <h3>RAM Usage</h3>
                     <div class="value" id="ram-usage">0%</div>
-                    <div style="font-size: 10px; color: #aaa; margin-top: 3px;">Avg: <span id="ram-avg">0%</span></div>
+                    <div style="font-size: 10px; color: #aaa; margin-top: 3px;">Total: <span id="ram-total">0 GB</span></div>
                 </div>
             </div>
             <div class="card">

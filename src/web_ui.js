@@ -309,6 +309,65 @@ function resetColumnSelection() {
 }
 
 function updateStatus() {
+    // Update system metrics
+    fetch("/api/system")
+        .then(function(r) { return r.json(); })
+        .then(function(data) {
+            // Update uptime
+            var uptimeEl = document.getElementById("uptime");
+            if (uptimeEl) {
+                uptimeEl.textContent = data.uptime_str || (data.uptime + "s");
+            }
+            
+            // Update CPU usage
+            var cpuUsageEl = document.getElementById("cpu-usage");
+            var cpuAvgEl = document.getElementById("cpu-avg");
+            var cpuTempEl = document.getElementById("cpu-temp");
+            if (cpuUsageEl) cpuUsageEl.textContent = data.cpu_usage.toFixed(1) + "%";
+            if (cpuAvgEl) cpuAvgEl.textContent = data.cpu_avg.toFixed(1) + "%";
+            if (cpuTempEl) {
+                if (data.cpu_temp && data.cpu_temp > 0) {
+                    cpuTempEl.textContent = data.cpu_temp.toFixed(1) + "°C";
+                } else {
+                    cpuTempEl.textContent = "--°C";
+                }
+            }
+            
+            // Update RAM usage
+            var ramUsageEl = document.getElementById("ram-usage");
+            var ramTotalEl = document.getElementById("ram-total");
+            if (ramUsageEl) ramUsageEl.textContent = data.ram_usage.toFixed(1) + "%";
+            if (ramTotalEl) {
+                var ramTotalGB = data.ram_total / (1024 * 1024 * 1024);
+                ramTotalEl.textContent = ramTotalGB.toFixed(2) + " GB";
+            }
+            
+            // Update disk usage
+            var diskUsageEl = document.getElementById("disk-usage");
+            var diskTotalEl = document.getElementById("disk-total");
+            if (diskUsageEl) {
+                var diskUsedGB = data.disk_used / (1024 * 1024 * 1024);
+                diskUsageEl.textContent = diskUsedGB.toFixed(2) + " GB";
+            }
+            if (diskTotalEl) {
+                var diskTotalGB = data.disk_total / (1024 * 1024 * 1024);
+                diskTotalEl.textContent = diskTotalGB.toFixed(2) + " GB";
+            }
+            
+            // Update recordings count and size
+            var recordingsCountEl = document.getElementById("recordings-count");
+            var recordingsSizeEl = document.getElementById("recordings-size");
+            if (recordingsCountEl) {
+                recordingsCountEl.textContent = data.recordings_count || 0;
+            }
+            if (recordingsSizeEl) {
+                var recordingsSizeMB = (data.recordings_size_bytes || 0) / (1024 * 1024);
+                recordingsSizeEl.textContent = recordingsSizeMB.toFixed(1) + " MB";
+            }
+        })
+        .catch(function(err) { console.error("System metrics update error:", err); });
+    
+    // Update channel status
     fetch("/api/status")
         .then(function(r) { return r.json(); })
         .then(function(data) {
